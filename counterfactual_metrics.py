@@ -18,6 +18,110 @@ def generate_cfs_ccfs(
         delta_max: float,
         lamb: float,
         feature_names: List[str],
+        norm=1,                  # Pass norm through
+        query_size_pct: float = 1.0,
+        random_seed: int = 42,
+        verbose: bool = False
+) -> Tuple[pd.DataFrame, pd.DataFrame, Dict]:
+    """Generate CFs and CCFs with given parameters."""
+    # Ensure keys match your CombinedEvaluator expectations
+    metrics = {
+        'cf_success': 0,
+        'cf_failures': 0,
+        'ccf_success': 0,
+        'ccf_failures': 0,
+        'cf_distances': [],      # Generic name
+        'ccf_distances': []      # Generic name
+    }
+
+    predict_fn = lambda x: predict_with_model(baseline_model, x)[1]
+    denied_indices = recourse_needed(predict_fn, X_query, target=1)
+
+    if verbose:
+        print(f"    Found {len(denied_indices)} denied queries out of {len(X_query)} total")
+
+    if query_size_pct < 1.0:
+        np.random.seed(random_seed)
+        n_samples = max(1, int(len(denied_indices) * query_size_pct))
+        sampled_denied_indices = np.random.choice(
+            denied_indices,
+            size=n_samples,
+            replace=False
+        )
+    else:
+        sampled_denied_indices = denied_indices
+
+    rr_cf = RobustRecourse(W=W, W0=W0, y_target=1, delta_max=delta_max)
+    cf_list = []
+
+    for i in sampled_denied_indices:
+        x_i = np.array(X_query[i], dtype=np.float32)
+        try:
+            # FIX 1: Pass norm to get_recourse
+            cf, _ = rr_cf.get_recourse(x_i, lamb=lamb, norm=norm)
+            if cf.ndim == 1:
+                cf = cf.reshape(1, -1)
+
+            # FIX 2: Use generic norm for distance calculation
+            dist = np.linalg.norm(cf.flatten() - x_i, ord=norm)
+            metrics['cf_distances'].append(dist)
+            metrics['cf_success'] += 1
+
+            cf_df = pd.DataFrame(cf, columns=feature_names)
+            cf_df["original_query_idx"] = i
+            cf_df["distance"] = dist # Rename from l1_distance
+            cf_list.append(cf_df)
+        except Exception as e:
+            metrics['cf_failures'] += 1
+            if verbose:
+                print(f"    [CF Error] idx={i}: {e}")
+
+    if not cf_list:
+        return pd.DataFrame(), pd.DataFrame(), metrics
+
+    cfs_df = pd.concat(cf_list, ignore_index=True)
+
+    rr_ccf = RobustRecourse(W=W, W0=W0, y_target=0, delta_max=delta_max)
+    ccf_list = []
+
+    for i in range(len(cfs_df)):
+        x_cf = cfs_df[feature_names].iloc[i].values.astype(np.float32)
+        original_idx = int(cfs_df.iloc[i]["original_query_idx"])
+        x_original = X_query[original_idx]
+
+        try:
+            ccf, _ = rr_ccf.get_recourse(x_cf, lamb=lamb, norm=norm)
+            if ccf.ndim == 1:
+                ccf = ccf.reshape(1, -1)
+
+            dist = np.linalg.norm(ccf.flatten() - x_original, ord=norm)
+            metrics['ccf_distances'].append(dist)
+            metrics['ccf_success'] += 1
+
+            ccf_df = pd.DataFrame(ccf, columns=feature_names)
+            ccf_df["original_query_idx"] = original_idx
+            ccf_df["distance"] = dist
+            ccf_list.append(ccf_df)
+        except Exception as e:
+            metrics['ccf_failures'] += 1
+            if verbose:
+                print(f"    [CCF Error] idx={i}: {e}")
+
+    if ccf_list:
+        ccfs_df = pd.concat(ccf_list, ignore_index=True)
+    else:
+        ccfs_df = pd.DataFrame()
+
+    return cfs_df, ccfs_df, metrics
+def generate_cfs_ccfs2(
+        X_query: np.ndarray,
+        baseline_model: nn.Module,
+        W: np.ndarray,
+        W0: np.ndarray,
+        delta_max: float,
+        lamb: float,
+        feature_names: List[str],
+        norm = 1,
         query_size_pct: float = 1.0,  # NEW
         random_seed: int = 42,
         verbose: bool = False
@@ -28,8 +132,8 @@ def generate_cfs_ccfs(
         'cf_failures': 0,
         'ccf_success': 0,
         'ccf_failures': 0,
-        'cf_l1_distances': [],
-        'ccf_l1_distances': []
+        'cf_distances': [],
+        'ccf_distances': []
     }
 
 
@@ -63,13 +167,13 @@ def generate_cfs_ccfs(
             if cf.ndim == 1:
                 cf = cf.reshape(1, -1)
 
-            l1_dist = l1_distance(x_i, cf.flatten())
-            metrics['cf_l1_distances'].append(l1_dist)
+            dist = np.linalg.norm(cf.flatten() - x_i, ord=norm)
+            metrics['cf_l1_distances'].append(dist)
             metrics['cf_success'] += 1
 
             cf_df = pd.DataFrame(cf, columns=feature_names)
             cf_df["original_query_idx"] = i
-            cf_df["l1_distance"] = l1_dist
+            cf_df["l1_distance"] = dist
             cf_list.append(cf_df)
         except Exception as e:
             metrics['cf_failures'] += 1

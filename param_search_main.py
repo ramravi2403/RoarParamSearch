@@ -45,6 +45,10 @@ def load_data(data_dir: Path, train_file: str, query_file: str,
 
 
 def main():
+    def parse_norm(value):
+        if value.lower() == 'inf':
+            return float('inf')
+        return int(value)
     set_seed(42)
     parser = argparse.ArgumentParser(
         description="Combined parameter evaluation: CF/CCF generation + extraction",
@@ -72,6 +76,8 @@ def main():
     parser.add_argument('--size-values', type=float, nargs='+',
                         default=[0.2, 0.3, 0.5, 1.0],
                         help='Percentages of query set to use')
+    parser.add_argument('--norm-values', type=parse_norm, nargs='+', default=[1],
+                        help="List of norms to test (e.g., 1 2 inf)")
 
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--output', type=str, default='combined_evaluation_results')
@@ -89,6 +95,7 @@ def main():
     value_object = ValueObject(delta_max_values=args.delta_max_values,
                                lambda_values=args.lamb_values,
                                alpha_values=args.alpha_values,
+                               norm_values=args.norm_values,
                                X_train=X_train,
                                y_train=y_train,
                                X_query=X_query,

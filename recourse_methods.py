@@ -206,7 +206,7 @@ class RobustRecourse():
         delta_W, delta_W0 = np.array(delta_opt[:-1]), np.array([delta_opt[-1]])
         return delta_W, delta_W0
 
-    def get_recourse(self, x, lamb=0.1,lime=False):
+    def get_recourse(self, x, lamb=0.1,norm = 1,lime=False):
         torch.manual_seed(0)
 
         # returns x'
@@ -243,7 +243,7 @@ class RobustRecourse():
             if self.feature_costs is not None:
                 cost = self.pfc_cost(x_new, x)
             else:
-                cost = self.l1_cost(x_new, x)
+                cost = torch.norm(x_new - x, p=norm)
 
             loss = loss_fn(f_x_new, self.y_target) + lamb * cost
             loss.backward()
