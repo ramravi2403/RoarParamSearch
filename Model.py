@@ -12,12 +12,32 @@ class SimpleClassifier(nn.Module):
         return torch.sigmoid(self.linear(x))
 
 
-def train_classifier(X_train, y_train, input_dim, num_epochs=50, lr=0.01, verbose=False):
-    """Train a simple linear classifier."""
+class DeepClassifier(nn.Module):
+    def __init__(self, input_dim):
+        super(DeepClassifier, self).__init__()
+        self.network = nn.Sequential(
+            nn.Linear(input_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        return self.network(x)
+
+
+def train_classifier(X_train, y_train, input_dim, num_epochs=50, lr=0.01, verbose=False, model_type="simple"):
     X_tensor = torch.tensor(X_train, dtype=torch.float32)
     y_tensor = torch.tensor(y_train.reshape(-1, 1), dtype=torch.float32)
 
-    model = SimpleClassifier(input_dim)
+    # Resolve the string into the specific model object here
+    if model_type == "deep":
+        model = DeepClassifier(input_dim)
+    else:
+        model = SimpleClassifier(input_dim)
+
     criterion = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
@@ -28,9 +48,6 @@ def train_classifier(X_train, y_train, input_dim, num_epochs=50, lr=0.01, verbos
         loss = criterion(preds, y_tensor)
         loss.backward()
         optimizer.step()
-
-        if verbose and (epoch + 1) % 10 == 0:
-            print(f"    Epoch {epoch + 1}/{num_epochs}, Loss: {loss.item():.4f}")
 
     return model
 

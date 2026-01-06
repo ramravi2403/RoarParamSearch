@@ -7,6 +7,7 @@ import pandas as pd
 
 from CombinedEvaluator import CombinedEvaluator
 from ValueObject import ValueObject
+from Model import SimpleClassifier, DeepClassifier
 
 def set_seed(seed_value=42):
     import random
@@ -60,6 +61,8 @@ def main():
     parser.add_argument('--query-file', type=str, default='sba_query.csv')
     parser.add_argument('--test-file', type=str, default='sba_test.csv')
     parser.add_argument('--label-column', type=str, default='NoDefault')
+    parser.add_argument('--model-type', type=str, choices=['simple', 'deep'],
+                        default='simple', help='Baseline model architecture')
 
     # [0.0, 0.05, 0.1, 0.15, 0.2,]
     parser.add_argument('--delta-max-values', type=float, nargs='+',
@@ -105,7 +108,8 @@ def main():
     results = evaluator.evaluate(
         value_object,
         query_size_pcts=args.size_values,
-        num_epochs=args.epochs
+        num_epochs=args.epochs,
+        model_type=args.model_type
     )
 
     evaluator.print_summary()

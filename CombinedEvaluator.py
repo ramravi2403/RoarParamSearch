@@ -6,7 +6,7 @@ from typing import List, Optional
 import numpy as np
 import pandas as pd
 from Metrics import Metrics
-from Model import train_classifier, extract_model_weights
+from Model import train_classifier, extract_model_weights, SimpleClassifier
 from ValueObject import ValueObject
 from counterfactual_metrics import generate_cfs_ccfs, evaluate_extraction, calculate_quality_score
 
@@ -34,8 +34,9 @@ class CombinedEvaluator:
             X_test: np.ndarray,
             y_test: np.ndarray,
             feature_names: List[str],
-            query_size_pct: float,  # NEW
-            num_epochs: int = 100
+            query_size_pct: float,
+            num_epochs: int = 100,
+            model_type: str = 'simple',
     ) -> Optional[Metrics]:
         """Run experiment for a single (delta_max, lamb, alpha) combination."""
 
@@ -49,15 +50,26 @@ class CombinedEvaluator:
             X_train, y_train,
             input_dim=X_train.shape[1],
             num_epochs=num_epochs,
-            lr=0.01
+            lr=0.01,
+            model_type=model_type
         )
-        W, W0 = extract_model_weights(baseline_model)
+        if model_type == 'simple':
+            self.__print("  Identified simple model...Extracting weights")
+            W, W0 = extract_model_weights(baseline_model)
+        else:
+            self.__print("  Identified Deep model...Extracting weights")
+            W, W0 = None, None
 
         self.__print(f"  [2] Generating CFs/CCFs...")
         cfs_df, ccfs_df, gen_metrics = generate_cfs_ccfs(
-            X_query, baseline_model,W, W0, delta_max, lamb,
-            feature_names, query_size_pct=query_size_pct,  # NEW
-            random_seed=42, verbose=False
+            X_query, baseline_model, W, W0, delta_max, lamb,
+            feature_names,
+            X_train=X_train,
+            query_size_pct=query_size_pct,
+            norm=norm,
+            random_seed=42,
+            verbose=False,
+            model_type = model_type
         )
 
         if len(cfs_df) == 0 or len(ccfs_df) == 0:
@@ -114,7 +126,7 @@ class CombinedEvaluator:
             quality_score=quality
         )
 
-        self.__print(f"  ✓ CF L1: {result.cf_mean_distance:.4f} ± {result.cf_std_distance:.4f}")
+        self.__print(f"  ✓ CF Distance L - {result.norm}: {result.cf_mean_distance:.4f} ± {result.cf_std_distance:.4f}")
         self.__print(f"  ✓ Extracted Acc: {result.extracted_accuracy:.4f}, Agreement: {result.extracted_agreement:.4f}")
         self.__print(f"  ✓ Quality Score: {result.quality_score:.4f}")
 
@@ -124,7 +136,8 @@ class CombinedEvaluator:
         self,
         value_object:ValueObject,
         query_size_pcts: List[float],
-        num_epochs: int = 100
+        num_epochs: int = 100,
+        model_type:str = 'simple'
     ) -> List[Metrics]:
         """Evaluate all parameter combinations."""
 
@@ -152,7 +165,7 @@ class CombinedEvaluator:
                             result = self.run_single_combination(
                                 delta_max, lamb, alpha,norm,
                                 value_object.X_train, value_object.y_train, value_object.X_query, value_object.X_test, value_object.y_test,
-                                value_object.feature_names, query_pct,num_epochs
+                                value_object.feature_names, query_pct,num_epochs,model_type = model_type
                             )
 
                             if result is not None:

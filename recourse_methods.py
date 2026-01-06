@@ -202,6 +202,8 @@ class RobustRecourse():
         bounds = [bound] * len(gradient_w_loss)
 
         res = linprog(c, bounds=bounds, A_eq=A_eq, b_eq=b_eq, method='simplex')
+        if not res.success:
+            print(f"  [SOLVER DEBUG] linprog failed: {res.message}")
         delta_opt = res.x  # the delta value that maximizes the function
         delta_W, delta_W0 = np.array(delta_opt[:-1]), np.array([delta_opt[-1]])
         return delta_W, delta_W0
