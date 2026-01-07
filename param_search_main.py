@@ -7,7 +7,7 @@ import pandas as pd
 
 from CombinedEvaluator import CombinedEvaluator
 from ValueObject import ValueObject
-from Model import SimpleClassifier, DeepClassifier
+
 
 def set_seed(seed_value=42):
     import random

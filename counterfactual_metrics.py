@@ -7,14 +7,15 @@ import pandas as pd
 from sklearn.metrics import roc_auc_score, accuracy_score
 from torch import nn
 
-from Model import train_classifier, predict_with_model
+#from Model import train_classifier, predict_with_model
+from models.ModelWrapper import ModelWrapper
 from recourse_methods import RobustRecourse
 from recourse_utils import recourse_needed, lime_explanation
 
 
 def generate_cfs_ccfs(
         X_query: np.ndarray,
-        baseline_model: nn.Module,
+        baseline_model: ModelWrapper,
         W: np.ndarray,
         W0: np.ndarray,
         delta_max: float,
@@ -40,7 +41,7 @@ def generate_cfs_ccfs(
         'ccf_distances': []
     }
 
-    predict_fn = lambda x: predict_with_model(baseline_model, x)[1]
+    predict_fn = lambda x: baseline_model.predict(x)[1]
     denied_indices = recourse_needed(predict_fn, X_query, target=1)
 
     if verbose:
@@ -65,7 +66,7 @@ def generate_cfs_ccfs(
             def predict_proba_fn(x):
                 if len(x.shape) == 1:
                     x = x.reshape(1, -1)
-                probs, _ = predict_with_model(baseline_model, x)
+                probs, _ = baseline_model.predict(x)
                 probs = probs.flatten()
                 return np.vstack([1 - probs, probs]).T
 
@@ -86,7 +87,7 @@ def generate_cfs_ccfs(
             if cf is None:
                 print(f"[DEBUG CF {i}] FAILED: Solver returned None")
             else:
-                _, cf_pred = predict_with_model(baseline_model, cf.reshape(1, -1))
+                _, cf_pred = baseline_model.predict(cf.reshape(1, -1))
                 print(f"[DEBUG CF {i}] SUCCESS: CF found. New Prediction: {cf_pred}")
             if cf.ndim == 1:
                 cf = cf.reshape(1, -1)
@@ -122,7 +123,7 @@ def generate_cfs_ccfs(
             def predict_proba_fn(x):
                 if len(x.shape) == 1:
                     x = x.reshape(1, -1)
-                probs, _ = predict_with_model(baseline_model, x)
+                probs, _ = baseline_model.predict(x)
                 probs = probs.flatten()
                 return np.vstack([1 - probs, probs]).T
 
@@ -171,13 +172,14 @@ def evaluate_extraction(
         ccfs_df: pd.DataFrame,
         X_test: np.ndarray,
         y_test: np.ndarray,
-        baseline_model: nn.Module,
+        baseline_model: ModelWrapper,
         feature_names: List[str],
         alpha: float,
         X_train=None,
         y_train=None,
         num_epochs: int = 50,
         verbose: bool = False,
+        model_type:str ="simple"
 
 ) -> Dict:
     """Train extracted and augmented models, evaluate on test set."""
@@ -186,24 +188,24 @@ def evaluate_extraction(
     X_cfs = cfs_df[feature_names].values.astype(np.float32)
     X_ccfs = ccfs_df[feature_names].values.astype(np.float32)
 
-    _, y_cfs = predict_with_model(baseline_model, X_cfs)
-    _, y_ccfs = predict_with_model(baseline_model, X_ccfs)
+    _, y_cfs = baseline_model.predict(X_cfs)
+    _, y_ccfs = baseline_model.predict(X_ccfs)
 
     X_extracted = np.vstack([X_cfs, X_ccfs])
     y_extracted = np.concatenate([y_cfs, y_ccfs])
 
     if verbose:
         print(f"    Training extracted model (alpha={alpha})...")
-    extracted_model = train_classifier(
+    extracted_model = ModelWrapper(input_dim=X_extracted.shape[1], model_type=model_type)
+    extracted_model.train(
         X_extracted, y_extracted,
-        input_dim=X_extracted.shape[1],
         num_epochs=num_epochs,
         lr=alpha,
-        verbose=verbose
+        verbose=verbose,
     )
 
-    baseline_probs, baseline_preds = predict_with_model(baseline_model, X_test)
-    extracted_probs, extracted_preds = predict_with_model(extracted_model, X_test)
+    baseline_probs, baseline_preds = baseline_model.predict(X_test)
+    extracted_probs, extracted_preds = extracted_model.predict(X_test)
 
     extracted_acc = accuracy_score(y_test, extracted_preds)
     extracted_auc = roc_auc_score(y_test, extracted_probs) if len(np.unique(y_test)) > 1 else 0.0
@@ -223,10 +225,9 @@ def evaluate_extraction(
         # Combine original data with CFs/CCFs
         X_aug = np.vstack([X_train, X_extracted])
         y_aug = np.concatenate([y_train, y_extracted])
-
-        aug_model = train_classifier(X_aug, y_aug, input_dim=X_aug.shape[1], lr=alpha)
-        aug_probs, aug_preds = predict_with_model(aug_model, X_test)
-
+        aug_model = ModelWrapper(input_dim=X_aug.shape[1], model_type=model_type)
+        aug_model.train(X_aug, y_aug, num_epochs=num_epochs, lr=alpha, verbose=verbose)
+        aug_probs, aug_preds = aug_model.predict(X_test)
         metrics['augmented_accuracy'] = accuracy_score(y_test, aug_preds)
         metrics['augmented_auc'] = roc_auc_score(y_test, aug_probs)
 
