@@ -98,6 +98,7 @@ class CombinedEvaluator:
         )
 
         result = Metrics(
+            model_type=model_type,
             delta_max=delta_max,
             lamb=lamb,
             alpha=alpha,
