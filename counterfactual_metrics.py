@@ -66,7 +66,6 @@ def generate_cfs_ccfs(
                 probs = probs.flatten()
                 return np.vstack([1 - probs, probs]).T
 
-            #print(f"\n[DEBUG] Running LIME for query index {i}")
             local_W, local_W0 = lime_explanation(predict_proba_fn, X_train, x_i)
             rr_cf.set_W_lime(local_W)  #
             rr_cf.set_W0_lime(local_W0)
@@ -176,7 +175,6 @@ def evaluate_extraction(
 ) -> Dict:
     """Train extracted and augmented models, evaluate on test set."""
 
-    # Prepare CF/CCF training data
     X_cfs = cfs_df[feature_names].values.astype(np.float32)
     X_ccfs = ccfs_df[feature_names].values.astype(np.float32)
 
@@ -214,7 +212,6 @@ def evaluate_extraction(
     }
 
     if X_train is not None:
-        # Combine original data with CFs/CCFs
         X_aug = np.vstack([X_train, X_extracted])
         y_aug = np.concatenate([y_train, y_extracted])
         aug_model = ModelWrapper(input_dim=X_aug.shape[1], model_type=model_type)
@@ -224,12 +221,6 @@ def evaluate_extraction(
         metrics['augmented_auc'] = roc_auc_score(y_test, aug_probs)
 
     return metrics
-
-
-def l1_distance(x_original, x_counterfactual):
-    """Calculate L1 distance between original and counterfactual."""
-    return np.sum(np.abs(x_counterfactual - x_original))
-
 
 def calculate_quality_score(
         extracted_acc: float,
@@ -241,10 +232,7 @@ def calculate_quality_score(
         normalization_factor: float = 10.0  # Normalization factor for L1
 ) -> float:
     """
-    Calculate composite quality score.
-
-    Higher extraction metrics = better
-    Lower L1 distance = better (more minimal changes)
+    Calculate composite quality score - Linear ocombination of metrics
     """
     normalized_l1 = max(0, 1 - (cf_mean_l1 / normalization_factor))
 

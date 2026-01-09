@@ -38,13 +38,11 @@ class CombinedEvaluator:
             num_epochs: int = 100,
             model_type: str = 'simple',
     ) -> Optional[Metrics]:
-        """Run experiment for a single (delta_max, lamb, alpha) combination."""
 
         self.__print(f"\n{'─' * 70}")
         self.__print(f"  δ_max={delta_max:.3f}, λ={lamb:.3f}, α={alpha:.5f}")
         self.__print(f"{'─' * 70}")
 
-        # Train baseline model
         self.__print("  [1] Training baseline model...")
         baseline_model = ModelWrapper(input_dim=X_train.shape[1],model_type=model_type)
         model = baseline_model.train(X_train, y_train, num_epochs=100, lr=0.01, verbose=False)
@@ -68,7 +66,7 @@ class CombinedEvaluator:
         )
 
         if len(cfs_df) == 0 or len(ccfs_df) == 0:
-            self.__print(f"  ⚠️  Skipping: Insufficient CFs/CCFs generated")
+            self.__print(f"  WARNING:  Skipping: Insufficient CFs/CCFs generated")
             return None
 
         cf_dists = np.array(gen_metrics['cf_distances'])
@@ -136,7 +134,6 @@ class CombinedEvaluator:
         num_epochs: int = 100,
         model_type:str = 'simple'
     ) -> List[Metrics]:
-        """Evaluate all parameter combinations."""
 
         self.__print("\n" + "=" * 70)
         self.__print("   COMBINED PARAMETER EVALUATION")
@@ -171,7 +168,6 @@ class CombinedEvaluator:
         return self.results
 
     def print_summary(self):
-        """Print comprehensive summary of results with norm-aware reporting."""
         if not self.results:
             print("No results to summarize.")
             return
@@ -182,42 +178,35 @@ class CombinedEvaluator:
         self.__print("   SUMMARY: BEST RESULTS")
         self.__print("=" * 70)
 
-        # 1. Best Overall Quality
         best_quality = df.loc[df['quality_score'].idxmax()]
         self.__print("\n🏆 Best Overall Quality Score:")
-        # Added norm reporting here
         self.__print(
             f"  δ_max={best_quality['delta_max']:.3f}, λ={best_quality['lamb']:.3f}, α={best_quality['alpha']:.5f}, Norm={best_quality['norm']}")
         self.__print(f"  Quality: {best_quality['quality_score']:.4f}")
         self.__print(
             f"  Dist ({best_quality['norm']}): {best_quality['cf_mean_distance']:.4f}, Extracted Acc: {best_quality['extracted_accuracy']:.4f}")
 
-        # 2. Lowest Distance (Note: Comparing distances across different norms is mathematically complex,
-        # but this identifies the run with the smallest absolute value in its respective space)
         best_dist = df.loc[df['cf_mean_distance'].idxmin()]
-        self.__print(f"\n📏 Lowest CF Distance (Relative to Norm):")
+        self.__print(f"\n Lowest CF Distance (Relative to Norm):")
         self.__print(f"  δ_max={best_dist['delta_max']:.3f}, λ={best_dist['lamb']:.3f}, Norm={best_dist['norm']}")
         self.__print(f"  Distance ({best_dist['norm']}): {best_dist['cf_mean_distance']:.4f}")
         self.__print(
             f"  Extracted Acc: {best_dist['extracted_accuracy']:.4f}, Quality: {best_dist['quality_score']:.4f}")
 
-        # 3. Highest Accuracy
         best_acc = df.loc[df['extracted_accuracy'].idxmax()]
-        self.__print("\n🎯 Highest Extraction Accuracy:")
+        self.__print("\n Highest Extraction Accuracy:")
         self.__print(f"  δ_max={best_acc['delta_max']:.3f}, α={best_acc['alpha']:.5f}, Norm={best_acc['norm']}")
         self.__print(f"  Extracted Acc: {best_acc['extracted_accuracy']:.4f}")
         self.__print(
             f"  Dist ({best_acc['norm']}): {best_acc['cf_mean_distance']:.4f}, Quality: {best_acc['quality_score']:.4f}")
 
-        # 4. Highest Agreement
         best_agree = df.loc[df['extracted_agreement'].idxmax()]
-        self.__print("\n🤝 Highest Agreement with Baseline:")
+        self.__print("\n Highest Agreement with Baseline:")
         self.__print(f"  δ_max={best_agree['delta_max']:.3f}, α={best_agree['alpha']:.5f}, Norm={best_agree['norm']}")
         self.__print(f"  Agreement: {best_agree['extracted_agreement']:.4f}")
         self.__print(
             f"  Dist ({best_agree['norm']}): {best_agree['cf_mean_distance']:.4f}, Quality: {best_agree['quality_score']:.4f}")
 
-        # 5. Impact of Norm (NEW ANALYSIS BLOCK)
         self.__print("\n" + "=" * 70)
         self.__print("   ANALYSIS: Impact of Norm Type")
         self.__print("=" * 70)
@@ -228,14 +217,12 @@ class CombinedEvaluator:
             self.__print(f"  Mean Extracted Acc: {subset['extracted_accuracy'].mean():.4f}")
             self.__print(f"  Mean Agreement: {subset['extracted_agreement'].mean():.4f}")
 
-        # 6. Impact of Robustness (Updated column names)
         self.__print("\n" + "=" * 70)
         self.__print("   ANALYSIS: Impact of Robustness (δ_max)")
         self.__print("=" * 70)
         for delta in sorted(df['delta_max'].unique()):
             subset = df[df['delta_max'] == delta]
             self.__print(f"\nδ_max = {delta:.3f}:")
-            # FIX: Changed cf_mean_l1 -> cf_mean_distance
             self.__print(
                 f"  Mean Distance: {subset['cf_mean_distance'].mean():.4f} ± {subset['cf_mean_distance'].std():.4f}")
             self.__print(f"  Mean Extracted Acc: {subset['extracted_accuracy'].mean():.4f}")
@@ -250,16 +237,13 @@ class CombinedEvaluator:
             n_ccfs_avg = subset['n_ccfs_generated'].mean()
 
             self.__print(f"\nQuery Size = {size_pct * 100:.0f}% (avg {n_cfs_avg:.0f} CFs):")
-            # FIX: Changed cf_mean_l1 -> cf_mean_distance
             self.__print(f"  Mean Distance: {subset['cf_mean_distance'].mean():.4f}")
             self.__print(f"  Mean Extracted Acc: {subset['extracted_accuracy'].mean():.4f}")
             self.__print(f"  Mean Agreement: {subset['extracted_agreement'].mean():.4f}")
             self.__print(f"  CF Success Rate: {subset['cf_success_rate'].mean():.2%}")
 
     def save_results(self, output_path: Path):
-        """Save results to JSON and CSV."""
         output_path = Path(output_path)
-
         json_path = output_path.with_suffix('.json')
         with open(json_path, 'w') as f:
             results_dict = [asdict(r) for r in self.results]
@@ -275,6 +259,6 @@ class CombinedEvaluator:
         df = pd.DataFrame([asdict(r) for r in self.results])
         df.to_csv(csv_path, index=False)
 
-        self.__print(f"\n✅ Results saved:")
+        self.__print(f"\n Results saved:")
         self.__print(f"   JSON: {json_path}")
         self.__print(f"   CSV: {csv_path}")

@@ -22,7 +22,6 @@ def set_seed(seed_value=42):
         torch.backends.cudnn.benchmark = False
 def load_data(data_dir: Path, train_file: str, query_file: str,
               test_file: str, label_column: str = "NoDefault"):
-    """Load training, query, and test data."""
     train_df = pd.read_csv(data_dir / train_file)
     query_df = pd.read_csv(data_dir / query_file)
     test_df = pd.read_csv(data_dir / test_file)
