@@ -4,8 +4,6 @@ from typing import Union
 
 @dataclass
 class Metrics:
-    """Results for a single (delta_max, lamb, alpha) combination."""
-    # Parameters
     model_type: str
     delta_max: float
     lamb: float
