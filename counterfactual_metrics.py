@@ -1,13 +1,9 @@
-import sys
+
 import traceback
 from typing import List, Tuple, Dict
-
 import numpy as np
 import pandas as pd
 from sklearn.metrics import roc_auc_score, accuracy_score
-from torch import nn
-
-#from Model import train_classifier, predict_with_model
 from models.ModelWrapper import ModelWrapper
 from recourse_methods import RobustRecourse
 from recourse_utils import recourse_needed, lime_explanation
@@ -72,12 +68,8 @@ def generate_cfs_ccfs(
 
             #print(f"\n[DEBUG] Running LIME for query index {i}")
             local_W, local_W0 = lime_explanation(predict_proba_fn, X_train, x_i)
-            #print(f"[DEBUG] LIME Local W (first 5): {local_W[:5]}")
-            #print(f"[DEBUG] LIME Intercept: {local_W0}")
             rr_cf.set_W_lime(local_W)  #
             rr_cf.set_W0_lime(local_W0)
-            #print(f"Type of local_W0: {type(local_W0)}")
-            #print(f"Type of local_W0: {type(local_W)}")
         else:
             rr_cf.set_W(W)
             rr_cf.set_W0(W0)
