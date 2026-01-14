@@ -3,7 +3,7 @@ from torch.autograd import Variable
 import torch.optim as optim
 from torch.autograd import grad
 import datetime
-import numpy as np # <--- ADD THIS IMPORT
+import numpy as np
 #from recourse.builder import RecourseBuilder
 #from recourse.builder import ActionSet
 from scipy.optimize import linprog

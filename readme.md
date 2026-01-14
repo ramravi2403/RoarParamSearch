@@ -1,6 +1,19 @@
 # ROAR: Robust Counterfactual Explanations
+## Acknowledgments & References
 
-This repository implements the **ROAR (Robust Recourse)** framework for generating and evaluating counterfactual explanations. It supports both simple linear classifiers and deep non-linear neural networks, using **LIME** for local linearization when dealing with complex architectures.
+This project builds upon and extends the following research and implementations:
+
+* **ROAR (Robust and Reliable Algorithmic Recourse):** The core robust optimization logic and utility functions (`recourse_methods.py`, `recourse_utils.py`) are adapted from the implementation of the ROAR framework.
+  * *Authors:* Sohini Upadhyay, Shalmali Joshi, Himabindu Lakkaraju.
+  * *Reference:* [arXiv:2102.13620 [cs.LG]](https://arxiv.org/abs/2102.13620)
+  * *Repository:* [AI4LIFE-GROUP/ROAR](https://github.com/AI4LIFE-GROUP/ROAR/tree/main)
+
+* **DualCF (Efficient Model Extraction Attack):** The conceptual framework for model extraction via counterfactuals and the evaluation of stability (Counter-Counterfactuals) is based on the DualCF methodology.
+  * *Authors:* Yongjie Wang, Hangwei Qian, Chunyan Miao.
+  * *Reference:* [Proceedings of the 2022 ACM Conference on Fairness, Accountability, and Transparency (FAccT '22)](https://doi.org/10.1145/3531146.3533188)
+
+**Note:** The foundational recourse solvers and utility scripts in this repository are from the original ROAR implementation. This project extends those works by introducing deep model support via LIME linearization and parameter search evaluation.
+This repository implements the **ROAR (Robust Recourse)** framework for generating and evaluating counterfactual explanations. It supports both simple linear classifiers and deep non-linear neural networks, using **LIME** for local linearization when dealing with non-linear networks.
 
 ---
 
