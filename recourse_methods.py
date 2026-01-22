@@ -16,10 +16,9 @@ def counterfactual_recourse(torch_model, x, feature_costs=None, y_target=1.0, n_
     torch.manual_seed(0)
 
     if feature_costs is not None:
-        # FIX 1: Convert to float32 before PyTorch conversion
+
         feature_costs = torch.from_numpy(feature_costs.astype(np.float32)).float()
 
-    # FIX 2: Convert to float32 before PyTorch conversion
     x = torch.from_numpy(x.astype(np.float32)).float()
     y_target = torch.tensor(y_target).float()
     lamb = torch.tensor(0.01).float()
@@ -96,7 +95,6 @@ class RobustRecourse():
         self.delta_max = delta_max
         self.feature_costs = feature_costs
         if self.feature_costs is not None:
-            # FIX 3: Convert to float32 before PyTorch conversion
             self.feature_costs = torch.from_numpy(feature_costs.astype(np.float32)).float()
 
     def set_W(self, W):
@@ -105,21 +103,14 @@ class RobustRecourse():
             self.W = torch.from_numpy(W.astype(np.float32)).float()
 
     def set_W_lime(self, W):
-        # ➡️ FIX: Use np.array() to ensure W is treated as a 1D NumPy array,
-        # even if it was a list or a single float, before calling torch.from_numpy().
         W_array = np.array(W, dtype=np.float32)
-
-        # torch.from_numpy() requires an ndarray, not a scalar (single float)
         self.W = torch.from_numpy(W_array).float()
 
 
     def set_W0(self, W0):
         self.W0 = W0
         if W0 is not None:
-            # FIX 5: Convert to float32 before PyTorch conversion
-            #print(type(self.W0))
             self.W0 = torch.from_numpy(W0.astype(np.float32)).float()
-            #self.W0 = torch.tensor(float(W0), dtype=torch.float32)
 
     def set_W0_lime(self, W0):
         if W0 is not None:
@@ -129,7 +120,6 @@ class RobustRecourse():
     def set_pW(self, pW):
         self.pW = pW
         if pW is not None:
-            # FIX 6: Convert to float32 before PyTorch conversion
             self.pW = torch.from_numpy(pW.astype(np.float32)).float()
 
     def set_pW0(self, pW0):
@@ -151,7 +141,6 @@ class RobustRecourse():
         calculate the optimal delta using linear program
         :returns: torch tensor with optimal delta value
         """
-        # ➡️ FIX: Use torch.atleast_1d to guarantee both W and W0 are 1D tensors.
         W_safe = torch.atleast_1d(self.W)
         W0_safe = torch.atleast_1d(self.W0)
 
@@ -212,7 +201,6 @@ class RobustRecourse():
         torch.manual_seed(0)
 
         # returns x'
-        # FIX 8: Convert to float32 before PyTorch conversion
         x = torch.from_numpy(x.astype(np.float32)).float()
         lamb = torch.tensor(lamb).float()
 
@@ -232,7 +220,6 @@ class RobustRecourse():
                 delta_W, delta_W0 = self.calc_delta_opt_lime(x_new)
             else:
                 delta_W, delta_W0 = self.calc_delta_opt(x_new)
-            #delta_W, delta_W0 = self.calc_delta_opt(x_new)
             delta_W, delta_W0 = torch.from_numpy(delta_W).float(), torch.from_numpy(delta_W0).float()
 
             optimizer.zero_grad()
@@ -392,8 +379,6 @@ class RobustRecourse():
                     break
         if lamb is None:
             lamb = l
-
-        print(m1_validity)
         return delta, lamb
 
 
