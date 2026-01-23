@@ -156,7 +156,7 @@ def apply_preset(args):
     for key, value in preset_config.items():
         setattr(args, key, value)
 
-    print(f"📋 Applied preset: '{args.preset}'")
+    print(f"Applied preset: '{args.preset}'")
     return args
 
 
@@ -181,20 +181,16 @@ def print_config(args):
 def main():
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     os.chdir("..")
-    # Parse arguments
     args = parse_args()
-
-    # Print configuration
     print_config(args)
 
 
-    # Check if input file exists
     if not os.path.exists(args.input):
-        print(f"❌ Error: Input file not found: {args.input}")
+        print(f"Error: Input file not found: {args.input}")
         sys.exit(1)
 
-    # Initialize dataset processor
-    print("🔧 Initializing SBA Dataset processor...")
+
+    print("Initializing SBA Dataset processor...")
     dataset = SBADataset(
         fold=args.fold,
         feature_mode=args.feature_mode,
@@ -202,8 +198,8 @@ def main():
         keep_approvalfy=args.keep_approvalfy
     )
 
-    # Process data
-    print("📊 Loading and processing data...")
+
+    print("Loading and processing data...")
     try:
         X_train, y_train, X_test, y_test, X_query, y_query = dataset.get_data(
             file_name=args.input,
@@ -214,7 +210,6 @@ def main():
             introduce_leakage=args.introduce_leakage
         )
 
-        # Print summary
         print("\n✅ Dataset preparation complete!")
         print(f"\nDataset sizes:")
         print(f"  Training:   {len(X_train):,} samples")
@@ -225,10 +220,10 @@ def main():
         print(f"Class balance (train): {y_train.mean():.1%} positive class")
 
         if args.introduce_leakage:
-            print("\n⚠️  WARNING: Data leakage was introduced (for experimental purposes)")
+            print("\n WARNING: Data leakage was introduced (for experimental purposes)")
 
     except Exception as e:
-        print(f"\n❌ Error during processing: {e}")
+        print(f"\nError during processing: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
