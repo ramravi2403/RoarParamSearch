@@ -1,0 +1,691 @@
+import sys
+import tqdm
+import torch
+import numpy as np
+import torch.optim as optim
+
+from abc import ABC, abstractmethod
+from copy import deepcopy
+from scipy.optimize import linprog, milp, LinearConstraint, Bounds, minimize
+from src.utils import *
+from torch.autograd import grad
+from typing import List, Callable
+
+import cvxpy as cp
+
+class RecourseCost:
+    def __init__(self, x_0: np.ndarray, lamb: float, cost_fn: Callable = l1_cost):
+        self.x_0 = x_0
+        self.lamb = lamb
+        self.cost_fn = cost_fn
+        
+    def eval(self, x: np.ndarray, weights: np.ndarray, bias: np.ndarray, breakdown: bool = False):
+        f_x = 1 / (1 + np.exp(-(np.matmul(x, weights) + bias)))
+        bce_loss = -np.log(f_x)
+        cost = self.cost_fn(self.x_0, x)
+        recourse_cost = bce_loss + self.lamb*cost
+        if breakdown:
+            return bce_loss, cost, recourse_cost
+        return recourse_cost
+    
+    def eval_nonlinear(self, x, model, breakdown: bool = False):
+        if isinstance(x, np.ndarray):
+            x = torch.tensor(deepcopy(x)).float()
+        f_x = model(x)
+        loss_fn = torch.nn.BCELoss(reduction='mean')
+        bce_loss = loss_fn(f_x, torch.ones(f_x.shape).float())
+        cost = torch.dist(x, torch.tensor(self.x_0).float(), 1)
+        recourse_cost = bce_loss + self.lamb*cost
+        if breakdown:
+            return bce_loss.detach().item(), cost.detach().item(), recourse_cost.detach().item()
+        return recourse_cost.detach().item()
+    
+    
+class Recourse(ABC):
+    def __init__(self, weights: np.ndarray, bias: np.ndarray, alpha: float, lamb: float, imm_features: List, y_target: float = 1, seed: int|None = None):
+        super().__init__()
+        self.weights = weights
+        self.bias = bias
+        self.alpha = alpha
+        self.lamb = lamb
+        self.y_target = y_target
+        self.rng = np.random.default_rng(seed)
+        self.imm_features = imm_features
+        self.name = "Base"
+
+    def calc_theta_adv(self, x: np.ndarray):
+        weights_adv = self.weights - (self.alpha * np.sign(x))
+        for i in range(len(x)):
+            if np.sign(x[i]) == 0:
+                weights_adv[i] = weights_adv[i] - (self.alpha * np.sign(weights_adv[i]))
+        bias_adv = self.bias - self.alpha
+        
+        return weights_adv, bias_adv
+    
+    @abstractmethod
+    def get_recourse(self, x, *args, **kwargs):
+        pass
+
+    @abstractmethod
+    def set_weights(self, weights):
+        pass
+
+    @abstractmethod
+    def set_bias(self, bias):
+        pass
+
+    
+class LARRecourse(Recourse):
+    def __init__(self, weights: np.ndarray, bias: np.ndarray, alpha: float, lamb: float = 0.1, imm_features: List = [], y_target: float = 1, seed: int|None = None):
+        super().__init__(weights, bias, alpha, lamb, imm_features, y_target, seed)
+        self.name = "Alg1"
+    
+    def set_weights(self, weights):
+        self.weights = weights
+
+    def set_bias(self, bias):
+        self.bias = bias
+
+    def calc_delta(self, w: float, c: float):
+        if (w > self.lamb):
+            delta = ((np.log((w - self.lamb)/self.lamb) - c) / w)
+            if delta < 0: delta = 0.
+        elif (w < -self.lamb):
+            delta = (np.log((-w - self.lamb)/self.lamb) - c) / w
+            if delta > 0: delta = 0.
+        else:
+            delta = 0.
+        return delta   
+    
+    def calc_augmented_delta(self, x: np.ndarray, i: int, theta: tuple[np.ndarray, np.ndarray], theta_p: tuple[np.ndarray, np.ndarray], beta: float, J: RecourseCost):
+        n = 201
+        delta = 10
+        deltas = np.linspace(-delta, delta, n)
+        
+        x_rs = np.tile(x, (n, 1))
+        x_rs[:, i] += deltas
+        vals = beta*J.eval(x_rs, *theta) + (1-beta)*J.eval(x_rs, *theta_p)
+        min_i = np.argmin(vals)
+        return deltas[min_i]
+
+    def sign(self, x):
+        s = np.sign(x)
+        if s == 0: return 1
+        return s
+    
+    def sign_x(self, x: np.float64, direction: int) -> int:
+        """
+        direction = 1 -> x want to move to positive
+        direction = -1 -> x want to move to negative
+        direction = 0 -> x do not want to move
+        """
+
+        return np.sign(x) if x != 0 else direction
+    
+    def find_directions(self, weights: np.ndarray) -> np.ndarray:
+        """
+        We do not need to find direction for bias, so
+        the function accepts only weights
+        """
+        directions = np.zeros(weights.size)
+
+        for i, val in enumerate(weights):
+            if val > 0: directions[i] = 1
+            elif val < 0: directions[i] = -1 
+
+        return directions
+    
+    def get_max_idx(self, weights: np.ndarray, changed: List):
+        weights_copy = deepcopy(weights)
+        while True:
+            idx = np.argmax(np.abs(weights_copy))
+            if not changed[idx]:
+                return idx
+            else:
+                weights_copy[idx] = 0.
+    
+    def get_recourse(self, x_0: np.ndarray):
+        return self.get_robust_recourse(x_0)
+    
+    def get_robust_recourse(self, x_0: np.ndarray):
+        x = deepcopy(x_0)
+        weights = np.zeros(self.weights.size)
+        active = np.arange(0, self.weights.size)
+        immFeatures = deepcopy(self.imm_features)
+        bias = self.bias - self.alpha
+
+        for i in range(weights.size):
+            if x_0[i] != 0:
+                weights[i] = self.weights[i] - (self.alpha * np.sign(x_0[i]))
+            else:
+                if np.abs(self.weights[i]) > self.alpha:
+                    weights[i] = self.weights[i] - (self.alpha * np.sign(self.weights[i]))
+                else:
+                    immFeatures.append(i)
+
+        active = np.delete(active, immFeatures)
+        directions = self.find_directions(weights)
+
+        while active.size != 0:
+            i_active = np.argmax(np.abs(weights[active]))
+            i = active[i_active]
+            c = (x @ weights) + bias
+            delta = self.calc_delta(weights[i], c)
+
+            if self.sign_x(x[i] + delta, directions[i]) == self.sign_x(x[i], directions[i]):
+                x[i] += delta
+                break
+            else:
+                x[i] = 0
+                if np.abs(self.weights[i]) > self.alpha:
+                    weights[i] = self.weights[i] + (self.alpha * np.sign(x_0[i]))
+                else:
+                    active = np.delete(active, i_active)            
+        return x
+    
+    
+class ROARLInf(Recourse):
+    def __init__(self, weights: np.ndarray, bias: np.ndarray = None, alpha: float = 0.1, lamb: float = 0.1, y_target: float = 1., w_norm: str = 'L-inf'):
+        self.set_weights(weights)
+        self.set_bias(bias)
+        self.alpha = alpha
+        self.lamb = lamb
+        self.y_target = torch.tensor(y_target).float()
+        self.train_hist = {
+            'i': [],
+            'x_r': [],
+            'theta_adv': [],
+            'bce_loss': [],
+            'cost': [],
+            'J': []
+        }
+        self.w_norm = w_norm
+        self.name = "ROARLInf"
+    
+    def set_weights(self, weights: np.ndarray):
+        if weights is not None:
+            self.weights = torch.from_numpy(weights).float()
+        else:
+            self.weights = None
+        
+    def set_bias(self, bias: np.ndarray):
+        if bias is not None:
+            self.bias = torch.from_numpy(bias).float()
+        else:
+            self.bias = None
+    
+    def sign(self, x):
+        s = np.sign(x)
+        if s == 0: return 1
+        return s
+    
+    def l1_cost(self, x_new, x):
+        return torch.dist(x_new, x, 1)
+        
+    def calc_theta_adv(self, x):
+        if isinstance(x, np.ndarray):
+            x = torch.from_numpy(x).float()
+        
+        if self.w_norm == 'L-1':
+            return self.calc_theta_adv_l1(x)
+        else:
+            return self.calc_theta_adv_linf(x)
+    
+    def calc_theta_adv_linf(self, x):
+        theta = torch.cat((self.weights, self.bias), 0)
+        x = torch.cat((x, torch.ones(1)), 0)
+        for i in range(len(theta)):
+            theta[i] = theta[i] - (self.alpha * self.sign(x[i]))
+        weights, bias = theta[:-1], theta[[-1]]
+        
+        return weights.detach().numpy(), bias.detach().numpy()
+    
+    def calc_theta_adv_l1(self, x):
+        theta = torch.cat((self.weights, self.bias), 0)
+        x = torch.cat((x, torch.ones(1)), 0)
+        
+        i = torch.argmax(torch.abs(x))
+        theta[i] = theta[i] - (self.alpha * self.sign(x[i]))
+        weights, bias = theta[:-1], theta[[-1]]
+        
+        return weights.detach().numpy(), bias.detach().numpy()
+    
+    def calc_theta_adv_l2(self, x):
+        theta = torch.cat((self.weights, self.bias), 0)
+        x = torch.cat((x, torch.ones(1)), 0)
+        
+        i = torch.argmax(torch.abs(x))
+        theta[i] = theta[i] - (self.alpha * self.sign(x[i]))
+        weights, bias = theta[:-1], theta[[-1]]
+        
+        return weights.detach().numpy(), bias.detach().numpy()
+        
+    def get_recourse(self, x_0, theta_p=None, beta=1, lr=1e-3, abstol=1e-4, w_norm='L-inf'):
+        self.w_norm = w_norm
+        for key in self.train_hist.keys():
+            self.train_hist[key].clear()
+        if beta == 1.:
+            return self.get_robust_recourse(x_0, lr, abstol)
+
+    def get_robust_recourse(self, x_0, lr=1e-3, abstol=1e-4):         
+        x_0 = torch.from_numpy(x_0).float()
+        x_r = x_0.clone().requires_grad_()
+            
+        weights = deepcopy(self.weights)
+        bias = deepcopy(self.bias)
+    
+        optimizer = optim.Adam([x_r], lr=lr)
+        loss_fn = torch.nn.BCELoss()
+
+        loss = torch.tensor(1.)
+        loss_diff = 1
+        i = 0
+        while loss_diff > abstol:
+        # for _ in range(10000):
+            # if loss_diff < abstol:
+            #     break
+            loss_prev = loss.clone().detach()
+            
+            weights, bias = self.calc_theta_adv(x_r.clone().detach())
+            weights, bias = torch.from_numpy(weights).float(), torch.from_numpy(bias).float()
+            optimizer.zero_grad()
+            
+            f_x = torch.nn.Sigmoid()(torch.matmul(weights, x_r) + bias)[0]
+            bce_loss = loss_fn(f_x, self.y_target)
+            cost = self.l1_cost(x_r, x_0)
+            loss = bce_loss + self.lamb*cost
+            
+            loss.backward()
+            optimizer.step()
+            
+            loss_diff = torch.dist(loss_prev, loss, 1)
+
+            i += 1
+        
+        return x_r.detach().numpy()
+    
+class ROARL1(Recourse):
+    def __init__(self, weights: np.ndarray, bias: np.ndarray = None, alpha: float = 0.1, lamb: float = 0.1, y_target: float = 1., w_norm: str = 'L-1'):
+        self.set_weights(weights)
+        self.set_bias(bias)
+        self.alpha = alpha
+        self.lamb = lamb
+        self.y_target = torch.tensor(y_target).float()
+        self.train_hist = {
+            'i': [],
+            'x_r': [],
+            'theta_adv': [],
+            'bce_loss': [],
+            'cost': [],
+            'J': []
+        }
+        self.w_norm = w_norm
+        self.name = "ROARL1"
+    
+    def set_weights(self, weights: np.ndarray):
+        if weights is not None:
+            self.weights = torch.from_numpy(weights).float()
+        else:
+            self.weights = None
+        
+    def set_bias(self, bias: np.ndarray):
+        if bias is not None:
+            self.bias = torch.from_numpy(bias).float()
+        else:
+            self.bias = None
+    
+    def sign(self, x):
+        s = np.sign(x)
+        if s == 0: return 1
+        return s
+    
+    def l1_cost(self, x_new, x):
+        return torch.dist(x_new, x, 1)
+        
+    def calc_theta_adv(self, x):
+        if isinstance(x, np.ndarray):
+            x = torch.from_numpy(x).float()
+        
+        if self.w_norm == 'L-1':
+            return self.calc_theta_adv_l1(x)
+        else:
+            return self.calc_theta_adv_linf(x)
+    
+    def calc_theta_adv_linf(self, x):
+        theta = torch.cat((self.weights, self.bias), 0)
+        x = torch.cat((x, torch.ones(1)), 0)
+        for i in range(len(theta)):
+            theta[i] = theta[i] - (self.alpha * self.sign(x[i]))
+        weights, bias = theta[:-1], theta[[-1]]
+        
+        return weights.detach().numpy(), bias.detach().numpy()
+    
+    def calc_theta_adv_l1(self, x):
+        theta = torch.cat((self.weights, self.bias), 0)
+        x = torch.cat((x, torch.ones(1)), 0)
+        
+        i = torch.argmax(torch.abs(x))
+        theta[i] = theta[i] - (self.alpha * self.sign(x[i]))
+        weights, bias = theta[:-1], theta[[-1]]
+        
+        return weights.detach().numpy(), bias.detach().numpy()
+    
+    def calc_theta_adv_l2(self, x):
+        theta = torch.cat((self.weights, self.bias), 0)
+        x = torch.cat((x, torch.ones(1)), 0)
+        
+        i = torch.argmax(torch.abs(x))
+        theta[i] = theta[i] - (self.alpha * self.sign(x[i]))
+        weights, bias = theta[:-1], theta[[-1]]
+        
+        return weights.detach().numpy(), bias.detach().numpy()
+        
+        
+    def get_recourse(self, x_0, theta_p=None, beta=1, lr=1e-3, abstol=1e-4, w_norm='L-1'):
+        self.w_norm = w_norm
+        for key in self.train_hist.keys():
+            self.train_hist[key].clear()
+        if beta == 1.:
+            return self.get_robust_recourse(x_0, lr, abstol)
+
+    def get_robust_recourse(self, x_0, lr=1e-3, abstol=1e-4):         
+        x_0 = torch.from_numpy(x_0).float()
+        x_r = x_0.clone().requires_grad_()
+            
+        weights = deepcopy(self.weights)
+        bias = deepcopy(self.bias)
+    
+        optimizer = optim.Adam([x_r], lr=lr)
+        loss_fn = torch.nn.BCELoss()
+
+        loss = torch.tensor(1.)
+        loss_diff = 1
+        i = 0
+        while loss_diff > abstol:
+        # for _ in range(10000):
+            # if loss_diff < abstol:
+            #     break
+            loss_prev = loss.clone().detach()
+            
+            weights, bias = self.calc_theta_adv(x_r.clone().detach())
+            weights, bias = torch.from_numpy(weights).float(), torch.from_numpy(bias).float()
+            optimizer.zero_grad()
+            
+            f_x = torch.nn.Sigmoid()(torch.matmul(weights, x_r) + bias)[0]
+            bce_loss = loss_fn(f_x, self.y_target)
+            cost = self.l1_cost(x_r, x_0)
+            loss = bce_loss + self.lamb*cost
+            
+            loss.backward()
+            optimizer.step()
+            
+            loss_diff = torch.dist(loss_prev, loss, 1)
+
+            i += 1
+        
+        return x_r.detach().numpy()
+    
+class L1Recourse(Recourse):
+    def __init__(self, weights: np.ndarray, bias: np.ndarray, alpha: float = 0.1, lamb: float = 0.1, imm_features: List = [], y_target: float = 1, seed: int|float = 0):
+        super().__init__(weights, bias, alpha, lamb, imm_features, y_target, seed)
+
+        self.lr = 2.5
+        self.name = "L1PSD"
+
+        if weights is not None and bias is not None:
+            self._theta0 = np.concat((weights, bias))
+            self._theta0_pt = torch.from_numpy(self._theta0)
+
+    def set_weights(self, weights):
+        self.weights = weights
+        if self.bias is not None:
+            self._theta0 = np.concat((self.weights, self.bias))
+            self._theta0_pt = torch.from_numpy(self._theta0)
+
+    def set_bias(self, bias):
+        self.bias = bias
+        if self.weights is not None:
+            self._theta0 = np.concat((self.weights, self.bias))
+            self._theta0_pt = torch.from_numpy(self._theta0)
+
+    def set_learning_rate(self, lr:float):
+        self.lr = lr
+
+    def generateThetas(self):
+        thetas = self._theta0.copy()
+        if self.alpha == 0:
+            return np.array([thetas])
+        
+        thetas = np.repeat(thetas.reshape(1, self._theta0.size), (self._theta0.size * 2) - 1, axis=0)
+        thetas_i = 0
+
+        for i in range(self._theta0.size):
+            if i == self._theta0.size - 1:
+                thetas[thetas_i][i] -= self.alpha
+                thetas_i += 1
+                break
+
+            thetas[thetas_i][i] += self.alpha
+            thetas_i += 1
+            thetas[thetas_i][i] -= self.alpha
+            thetas_i += 1
+
+        return thetas
+    
+    def getStats(self, x0: np.ndarray, x: np.ndarray, theta: np.ndarray):
+        return np.log(1 + np.exp(-(x @ theta))) + \
+            (self.lamb * (np.linalg.norm(x0 - x, ord=1)))
+
+    def isFeasible(self, x: torch.Tensor, thetaP: torch.Tensor, has_bias=True):
+        attacked_i = torch.argmax(torch.abs(thetaP - self._theta0_pt))
+        if not has_bias:
+            x = torch.cat((x, torch.tensor([1])))
+        maxX_i = torch.argmax(torch.abs(x))
+        
+        if torch.abs(x[attacked_i]) >= torch.abs(x[maxX_i]):
+            # Bias
+            if attacked_i == len(x) - 1:
+                return True
+
+            if torch.sign(thetaP[attacked_i] - self._theta0_pt[attacked_i]) > 0:
+                if torch.sign(x[attacked_i]) <= 0:
+                    return True
+            else:
+                if torch.sign(x[attacked_i]) >= 0:
+                    return True
+        return False
+    
+    def getConstraints(self, thetaP: np.ndarray):
+        attacked_i = np.argmax(np.abs(thetaP - self._theta0))
+
+        if attacked_i == (thetaP.size - 1):
+            A = None
+            b = None
+        else:
+            A = np.zeros(((2 * self._theta0.size) - 3, self._theta0.size - 1))
+            b = np.zeros(A.shape[0])
+
+            A[:, attacked_i] = 1
+            A_i = 1
+            b[0] = -1
+
+            for i in range(A.shape[1]):
+                if i == attacked_i:
+                    continue
+                
+                A[A_i, i] = 1
+                A_i += 1
+                A[A_i, i] = -1
+                A_i += 1
+
+            if np.sign(thetaP[attacked_i] - self._theta0[attacked_i]) < 0:
+                A[:, attacked_i] *= -1
+
+        return A, b
+    
+    def projectToF(self, xR: np.ndarray, A: np.ndarray, b: np.ndarray, has_bias=True):
+        if has_bias:
+            xR = xR[:-1]
+            
+        x = cp.Variable(xR.size)
+        objective = cp.Minimize(0.5 * cp.sum_squares(xR - x))
+        constraints = [A @ x <= b]
+
+        prob = cp.Problem(objective, constraints)
+        prob.solve()
+
+        return x.value
+    
+    def _runPSDInvScalingMainDs(self, x0_pt: torch.Tensor, thetaP: torch.Tensor, A, b, abstol:float = 1e-8, 
+                                  n_epochs:int = 2000, lr0:float = 5, step_size:int =40, gamma:float =0.9):
+
+        if not self.isFeasible(x0_pt, thetaP, has_bias=True):
+            xR = torch.zeros(len(x0_pt) - 1, dtype=torch.float64, requires_grad=True)
+        else:
+            xR = x0_pt[:-1].clone().requires_grad_(True)
+
+        loss = torch.tensor(1.)
+        loss_diff = 1.
+
+        optimizer = torch.optim.SGD([xR], lr=lr0)
+        # lr_lambda = lambda last_epoch: (last_epoch + 1) ** (-power_t)
+        # scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_size , gamma=gamma)
+
+        for epoch in range(n_epochs):
+            if loss_diff <= abstol:
+                break
+
+            loss_prev = loss.clone().detach()
+            optimizer.zero_grad()
+
+            f_x = torch.nn.Sigmoid()(torch.matmul(xR, thetaP[:-1]) + thetaP[-1])
+            bce_loss = torch.nn.BCELoss()(f_x.unsqueeze(0), torch.ones(1, dtype=torch.float64))
+            cost = torch.dist(x0_pt[:-1], xR, 1)
+            loss = bce_loss + self.lamb*cost
+
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
+
+            if not self.isFeasible(xR.detach().clone(), thetaP, has_bias=False):
+                xR.data = torch.tensor(self.projectToF(xR.detach().clone().numpy(), A, b, has_bias=False))
+                
+            loss_diff = torch.dist(loss_prev, loss, 1)
+        
+        return np.append(xR.detach().numpy(), 1)
+
+    def _runPSDInvScalingBias(self, x0_pt: torch.Tensor, thetaP: torch.Tensor, abstol:float = 1e-8, 
+                                  n_epochs:int = 2000, lr0:float = 5, step_size:int =40, gamma:float =0.9):
+        
+        if not self.isFeasible(x0_pt, thetaP, has_bias=True):
+            xR = torch.zeros(len(x0_pt) - 1, dtype=torch.float64, requires_grad=True)
+        else:
+            xR = x0_pt[:-1].clone().requires_grad_(True)
+
+        loss = torch.tensor(1.)
+        loss_diff = 1.
+
+        optimizer = torch.optim.SGD([xR], lr=lr0)
+        # lr_lambda = lambda last_epoch: (last_epoch + 1) ** (-power_t)
+        # scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_size , gamma=gamma)
+
+        for epoch in range(n_epochs):
+            if loss_diff <= abstol:
+                break
+
+            loss_prev = loss.clone().detach()
+            optimizer.zero_grad()
+
+            f_x = torch.nn.Sigmoid()(torch.matmul(xR, thetaP[:-1]) + thetaP[-1])
+            bce_loss = torch.nn.BCELoss()(f_x.unsqueeze(0), torch.ones(1, dtype=torch.float64))
+            cost = torch.dist(x0_pt[:-1], xR, 1)
+            loss = bce_loss + self.lamb*cost
+
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
+
+            if not self.isFeasible(xR.detach().clone(), thetaP, has_bias=False):
+                xR.data = xR.data.clamp(min= -1, max= 1)
+                
+            loss_diff = torch.dist(loss_prev, loss, 1)
+
+        return np.append(xR.detach().numpy(), 1)
+    
+    def _runPSDInvScalingAlphaZero(self, x0_pt: torch.Tensor, thetaP: torch.Tensor, abstol:float = 1e-8, 
+                                  n_epochs:int = 2000, lr0:float = 5, step_size:int =40, gamma:float =0.9):
+        
+        xR = x0_pt[:-1].clone().requires_grad_(True)
+
+        loss = torch.tensor(1.)
+        loss_diff = 1.
+
+        optimizer = torch.optim.SGD([xR], lr=lr0)
+        # lr_lambda = lambda last_epoch: (last_epoch + 1) ** (-power_t)
+        # scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_size , gamma=gamma)
+
+        for epoch in range(n_epochs):
+            if loss_diff <= abstol:
+                break
+
+            loss_prev = loss.clone().detach()
+            optimizer.zero_grad()
+
+            f_x = torch.nn.Sigmoid()(torch.matmul(xR, thetaP[:-1]) + thetaP[-1])
+            bce_loss = torch.nn.BCELoss()(f_x.unsqueeze(0), torch.ones(1, dtype=torch.float64))
+            cost = torch.dist(x0_pt[:-1], xR, 1)
+            loss = bce_loss + self.lamb*cost
+
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
+                
+            loss_diff = torch.dist(loss_prev, loss, 1)
+
+        return np.append(xR.detach().numpy(), 1)
+
+    def runPSDInvScaling(self, x0: np.ndarray, thetaP: np.ndarray, abstol:float = 1e-8, 
+                                  n_epochs:int = 2000, lr0:float = 5, step_size=40, gamma=0.9):
+        
+        x0_pt = torch.from_numpy(x0)
+        
+        attacked_i = np.argmax(np.abs(thetaP - self._theta0))
+        thetaP_pt = torch.from_numpy(thetaP)
+
+        if (thetaP == self._theta0).all():
+            xR = self._runPSDInvScalingAlphaZero(x0_pt, thetaP_pt, abstol, n_epochs, lr0, step_size, gamma) 
+        elif attacked_i == (thetaP.size - 1):
+            xR = self._runPSDInvScalingBias(x0_pt, thetaP_pt, abstol, n_epochs, lr0, step_size, gamma)
+        else:
+            A, b = self.getConstraints(thetaP)
+            xR = self._runPSDInvScalingMainDs(x0_pt, thetaP_pt, A, b, abstol, n_epochs, lr0, step_size, gamma)
+
+        return xR
+    
+    def runPSDInvScalingAllThetas(self, x0: np.ndarray, abstol:float = 1e-8, n_epochs:int = 2000, 
+                                    lr0:float = 5, step_size=40, gamma=0.9, returnDataFrame = False):
+        
+        thetaPs = self.generateThetas()
+        xRs = np.empty(thetaPs.shape)
+        Js = np.empty(thetaPs.shape[0])
+
+        for i, thetaP in enumerate(thetaPs):
+            xRs[i] = self.runPSDInvScaling(x0, thetaP, abstol, n_epochs, lr0, step_size, gamma)
+            Js[i] = self.getStats(x0, xRs[i], thetaP)
+
+        if returnDataFrame:
+            everything = [(xRs[i], thetaPs[i], x0, self._theta0, Js[i], self.alpha, self.lamb) for i in range(len(Js))]
+            df = pd.DataFrame(everything, columns=self._column_names)
+            return df
+        else:
+            J_min_i = np.argmin(Js)
+            return xRs[J_min_i]
+
+    def get_recourse(self, x_0: np.ndarray):
+        x_0 = np.hstack((x_0, 1))
+        x_r = self.runPSDInvScalingAllThetas(x_0, abstol=1e-12, n_epochs=7000, lr0=self.lr,
+                                              step_size=30, gamma=0.95, returnDataFrame=False)
+        return x_r[:-1]
