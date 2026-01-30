@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from Metrics import Metrics
 from ValueObject import ValueObject
-from counterfactual_metrics import generate_cfs_ccfs, evaluate_extraction, calculate_quality_score
+from counterfactual_metrics import generate_cfs_ccfs, evaluate_extraction, calculate_quality_score, generate_cfs_ccfs2
 from models.ModelWrapper import ModelWrapper
 
 
@@ -23,135 +23,84 @@ class CombinedEvaluator:
             print(message)
 
     def run_single_combination(
-        self,
-            delta_max: float,
-            lamb: float,
-            alpha: float,
-            norm,
-            X_train: np.ndarray,
-            y_train: np.ndarray,
-            X_query: np.ndarray,
-            X_test: np.ndarray,
-            y_test: np.ndarray,
+            self,
+            vo: ValueObject,  # The DTO containing all data
             recourse_method: str,
-            feature_names: List[str],
             query_size_pct: float,
             num_epochs: int = 100,
             model_type: str = 'simple',
     ) -> Optional[Metrics]:
 
-        self.__print(f"\n{'─' * 70}")
-        self.__print(f"  δ_max={delta_max:.3f}, λ={lamb:.3f}, α={alpha:.5f}")
-        self.__print(f"{'─' * 70}")
+        baseline_model = ModelWrapper(input_dim=vo.X_train.shape[1], model_type=model_type)
+        baseline_model.train(vo.X_train, vo.y_train, num_epochs=100, lr=0.01, verbose=False)
+        W, W0 = baseline_model.extract_weights() if model_type == 'simple' else (None, None)
 
-        self.__print("  [1] Training baseline model...")
-        baseline_model = ModelWrapper(input_dim=X_train.shape[1],model_type=model_type)
-        model = baseline_model.train(X_train, y_train, num_epochs=100, lr=0.01, verbose=False)
-        if model_type == 'simple':
-            self.__print("  Identified simple model...Extracting weights")
-            W, W0 = model.extract_weights()
-        else:
-            self.__print("  Identified Deep model...Extracting weights")
-            W, W0 = None, None
-
-        self.__print(f"  [2] Generating CFs/CCFs...")
-        cfs_df, ccfs_df, gen_metrics = generate_cfs_ccfs(
-            X_query, model, W, W0, delta_max, lamb,
-            feature_names,
-            X_train=X_train,
-            query_size_pct=query_size_pct,
-            norm=norm,
-            random_seed=42,
-            verbose=False,
-            recourse_method=recourse_method,
-            model_type = model_type
+        cfs_df, ccfs_df, gen_metrics = generate_cfs_ccfs2(
+            vo, baseline_model, W, W0, query_size_pct, recourse_method
         )
 
         if len(cfs_df) == 0 or len(ccfs_df) == 0:
-            self.__print(f"  WARNING:  Skipping: Insufficient CFs/CCFs generated")
             return None
+
+        ext_metrics = evaluate_extraction(
+            cfs_df, ccfs_df, vo.X_test, vo.y_test, baseline_model,
+            vo.feature_names, vo.alpha_values[0], vo.X_train, vo.y_train,
+            num_epochs, model_type=model_type
+        )
 
         cf_dists = np.array(gen_metrics['cf_distances'])
         ccf_dists = np.array(gen_metrics['ccf_distances'])
 
-        n_queries = len(X_query)
-        cf_success_rate = gen_metrics['cf_success'] / n_queries if n_queries > 0 else 0.0
-        ccf_success_rate = gen_metrics['ccf_success'] / len(cfs_df) if len(cfs_df) > 0 else 0.0
-
-        self.__print(f"  [3] Evaluating extraction (alpha={alpha})...")
-        extraction_metrics = evaluate_extraction(
-            cfs_df, ccfs_df, X_test, y_test,
-            model, feature_names, alpha,
-            X_train=X_train,
-            y_train=y_train,
-            num_epochs=num_epochs, verbose=False,
-            model_type= model_type
-        )
-
-        quality = calculate_quality_score(
-            extracted_acc=extraction_metrics['extracted_accuracy'],
-            extracted_auc=extraction_metrics['extracted_auc'],
-            extracted_agreement=extraction_metrics['extracted_agreement'],
-            augmented_acc=extraction_metrics['augmented_accuracy'],
-            augmented_auc=extraction_metrics['augmented_auc'],
-            cf_mean_l1=float(np.mean(cf_dists))
-        )
-
-        result = Metrics(
+        return Metrics(
             model_type=model_type,
-            recourse_method = recourse_method,
-            delta_max=delta_max,
-            lamb=lamb,
-            alpha=alpha,
-            norm=norm,
+            recourse_method=recourse_method,
+            delta_max=vo.delta_max_values[0],
+            lamb=vo.lambda_values[0],
+            alpha=vo.alpha_values[0],
+            norm=vo.norm_values[0],
             n_cfs_generated=len(cfs_df),
             n_ccfs_generated=len(ccfs_df),
-            cf_success_rate=cf_success_rate,
-            ccf_success_rate=ccf_success_rate,
+            cf_success_rate=gen_metrics['cf_success'] / len(vo.X_query),
+            ccf_success_rate=gen_metrics['ccf_success'] / len(cfs_df),
             cf_mean_distance=float(np.mean(cf_dists)),
             cf_std_distance=float(np.std(cf_dists)),
             cf_min_distance=float(np.min(cf_dists)),
             cf_max_distance=float(np.max(cf_dists)),
             ccf_mean_distance=float(np.mean(ccf_dists)),
             ccf_std_distance=float(np.std(ccf_dists)),
-            extracted_accuracy=extraction_metrics['extracted_accuracy'],
-            extracted_auc=extraction_metrics['extracted_auc'],
-            extracted_agreement=extraction_metrics['extracted_agreement'],
-            extracted_mean_prob_shift=extraction_metrics['extracted_mean_prob_shift'],
-            augmented_accuracy=extraction_metrics['augmented_accuracy'],
-            augmented_auc=extraction_metrics['augmented_auc'],
+            extracted_accuracy=ext_metrics['extracted_accuracy'],
+            extracted_auc=ext_metrics['extracted_auc'],
+            extracted_agreement=ext_metrics['extracted_agreement'],
+            extracted_mean_prob_shift=ext_metrics['extracted_mean_prob_shift'],
+            augmented_accuracy=ext_metrics['augmented_accuracy'],
+            augmented_auc=ext_metrics['augmented_auc'],
             query_size_pct=query_size_pct,
-            quality_score=quality
+            quality_score=calculate_quality_score(
+                ext_metrics['extracted_accuracy'], ext_metrics['extracted_auc'],
+                ext_metrics['extracted_agreement'], ext_metrics['augmented_accuracy'],
+                ext_metrics['augmented_auc'], float(np.mean(cf_dists))
+            )
         )
 
-        self.__print(f"  ✓ CF Distance L - {result.norm}: {result.cf_mean_distance:.4f} ± {result.cf_std_distance:.4f}")
-        self.__print(f"  ✓ Extracted Acc: {result.extracted_accuracy:.4f}, Agreement: {result.extracted_agreement:.4f}")
-        self.__print(f"  ✓ Quality Score: {result.quality_score:.4f}")
-
-        return result
-
     def evaluate(
-        self,
-        value_object:ValueObject,
-        query_size_pcts: List[float],
-        recourse_method: str = 'roar',
-        num_epochs: int = 100,
-        model_type:str = 'simple',
+            self,
+            value_object: ValueObject,
+            query_size_pcts: List[float],
+            recourse_method: str = 'roar',
+            num_epochs: int = 100,
+            model_type: str = 'simple',
     ) -> List[Metrics]:
 
         self.__print("\n" + "=" * 70)
-        self.__print("   COMBINED PARAMETER EVALUATION")
+        self.__print("   COMBINED PARAMETER EVALUATION (DTO REFACTORED)")
         self.__print("=" * 70)
-        self.__print(f"\nδ_max values: {value_object.delta_max_values}")
-        self.__print(f"λ values: {value_object.lambda_values}")
-        self.__print(f"α values: {value_object.alpha_values}")
-        self.__print(f"Query size %: {query_size_pcts}")
 
-        total = len(value_object.delta_max_values) * len(value_object.lambda_values) * len(value_object.alpha_values) * len(query_size_pcts) * len(value_object.norm_values)
-        self.__print(f"\nTotal combinations: {total}")
+        total = (len(value_object.delta_max_values) * len(value_object.lambda_values) * len(
+            value_object.alpha_values) * len(query_size_pcts) * len(value_object.norm_values))
 
         self.results = []
         current = 0
+
         for norm in value_object.norm_values:
             for delta_max in value_object.delta_max_values:
                 for lamb in value_object.lambda_values:
@@ -159,11 +108,25 @@ class CombinedEvaluator:
                         for query_pct in query_size_pcts:
                             current += 1
                             self.__print(f"\n[{current}/{total}]")
+                            single_context_vo = ValueObject(
+                                delta_max_values=[delta_max],
+                                lambda_values=[lamb],
+                                alpha_values=[alpha],
+                                norm_values=[norm],
+                                X_train=value_object.X_train,
+                                y_train=value_object.y_train,
+                                X_query=value_object.X_query,
+                                X_test=value_object.X_test,
+                                y_test=value_object.y_test,
+                                feature_names=value_object.feature_names
+                            )
 
                             result = self.run_single_combination(
-                                delta_max = delta_max, lamb = lamb, alpha = alpha,norm = norm,
-                                X_train = value_object.X_train, y_train = value_object.y_train, X_query = value_object.X_query, X_test = value_object.X_test, y_test = value_object.y_test,
-                                feature_names = value_object.feature_names, recourse_method = recourse_method, query_size_pct = query_pct,num_epochs = num_epochs,model_type = model_type
+                                vo=single_context_vo,
+                                recourse_method=recourse_method,
+                                query_size_pct=query_pct,
+                                num_epochs=num_epochs,
+                                model_type=model_type
                             )
 
                             if result is not None:

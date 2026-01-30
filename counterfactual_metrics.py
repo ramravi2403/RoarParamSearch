@@ -1,15 +1,106 @@
 
 import traceback
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 import numpy as np
 import pandas as pd
 from sklearn.metrics import roc_auc_score, accuracy_score
+
+import ValueObject
 from models.ModelWrapper import ModelWrapper
 from optimal_recourse.src.recourse import Recourse, LARRecourse, ROARLInf
 from recourse_methods import RobustRecourse
+from recourse_solvers.RecourseSolverFactory import RecourseSolverFactory
 from recourse_utils import recourse_needed, lime_explanation
 
 
+def _get_local_explanation(
+        x: np.ndarray,
+        baseline_model: ModelWrapper,
+        W: Optional[np.ndarray],
+        W0: Optional[np.ndarray],
+        X_train: Optional[np.ndarray]
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Get local linear explanation via LIME or return global weights."""
+    use_lime = (W is None or W0 is None)
+
+    if use_lime:
+        def predict_proba_fn(x_input):
+            if len(x_input.shape) == 1:
+                x_input = x_input.reshape(1, -1)
+            probs, _ = baseline_model.predict(x_input)
+            probs = probs.flatten()
+            return np.vstack([1 - probs, probs]).T
+
+        return lime_explanation(predict_proba_fn, X_train, x)
+
+    return W, W0
+
+
+def generate_cfs_ccfs2(
+        vo: ValueObject,
+        baseline_model: ModelWrapper,
+        W: Optional[np.ndarray],
+        W0: Optional[np.ndarray],
+        query_size_pct: float,
+        recourse_method: str = 'roar',
+        verbose: bool = False
+) -> Tuple[pd.DataFrame, pd.DataFrame, Dict]:
+    use_lime = (W is None or W0 is None)
+    factory = RecourseSolverFactory(vo, recourse_method, W, W0)
+
+    metrics = {'cf_success': 0, 'cf_failures': 0, 'ccf_success': 0, 'ccf_failures': 0,
+               'cf_distances': [], 'ccf_distances': []}
+
+    predict_fn = lambda x: baseline_model.predict(x)[1]
+    denied_indices = recourse_needed(predict_fn, vo.X_query, target=1)
+
+    np.random.seed(42)
+    n_samples = max(1, int(len(denied_indices) * query_size_pct))
+    sampled_indices = np.random.choice(denied_indices, size=n_samples,
+                                       replace=False) if query_size_pct < 1.0 else denied_indices
+    cf_list = []
+    for i in sampled_indices:
+        x_i = vo.X_query[i].astype(np.float32)
+        try:
+            local_W, local_W0 = _get_local_explanation(x_i, baseline_model, W, W0, vo.X_train)
+            solver = factory.create(local_W, local_W0, target=1, use_lime=use_lime)
+
+            cf = solver.get_recourse(x_i, lamb=vo.lambda_values[0], norm=vo.norm_values[0], lime=use_lime)[
+                0] if recourse_method == 'roar' else solver.get_recourse(x_i)
+
+            dist = np.linalg.norm(cf.flatten() - x_i, ord=vo.norm_values[0])
+            metrics['cf_distances'].append(dist)
+            metrics['cf_success'] += 1
+            cf_list.append(
+                pd.DataFrame(cf.reshape(1, -1), columns=vo.feature_names).assign(original_query_idx=i, distance=dist))
+        except Exception as e:
+            metrics['cf_failures'] += 1
+            print(f"[DEBUG CF {i}] EXCEPTION during generation: {str(e)}")
+            traceback.print_exc()
+
+    if not cf_list: return pd.DataFrame(), pd.DataFrame(), metrics
+    cfs_df = pd.concat(cf_list, ignore_index=True)
+
+    ccf_list = []
+    for _, row in cfs_df.iterrows():
+        x_cf = row[vo.feature_names].values.astype(np.float32)
+        try:
+            local_W, local_W0 = _get_local_explanation(x_cf, baseline_model, W, W0, vo.X_train)
+            solver_ccf = factory.create(local_W, local_W0, target=0, use_lime=use_lime)
+            ccf = solver_ccf.get_recourse(x_cf, lamb=vo.lambda_values[0], norm=vo.norm_values[0], lime=use_lime)[
+                0] if recourse_method == 'roar' else solver_ccf.get_recourse(x_cf)
+
+            dist = np.linalg.norm(ccf.flatten() - vo.X_query[int(row['original_query_idx'])], ord=vo.norm_values[0])
+            metrics['ccf_distances'].append(dist)
+            metrics['ccf_success'] += 1
+            ccf_list.append(pd.DataFrame(ccf.reshape(1, -1), columns=vo.feature_names).assign(
+                original_query_idx=row['original_query_idx'], distance=dist))
+        except Exception as e:
+            metrics['ccf_failures'] += 1
+            print(f"[DEBUG CCF {i}] EXCEPTION during generation: {str(e)}")
+            traceback.print_exc()
+
+    return cfs_df, (pd.concat(ccf_list, ignore_index=True) if ccf_list else pd.DataFrame()), metrics
 def generate_cfs_ccfs(
         X_query: np.ndarray,
         baseline_model: ModelWrapper,
