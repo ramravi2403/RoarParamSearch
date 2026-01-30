@@ -5,6 +5,7 @@ from typing import Union
 @dataclass
 class Metrics:
     model_type: str
+    recourse_method:str
     delta_max: float
     lamb: float
     alpha: float

@@ -33,6 +33,7 @@ class CombinedEvaluator:
             X_query: np.ndarray,
             X_test: np.ndarray,
             y_test: np.ndarray,
+            recourse_method: str,
             feature_names: List[str],
             query_size_pct: float,
             num_epochs: int = 100,
@@ -62,6 +63,7 @@ class CombinedEvaluator:
             norm=norm,
             random_seed=42,
             verbose=False,
+            recourse_method=recourse_method,
             model_type = model_type
         )
 
@@ -97,6 +99,7 @@ class CombinedEvaluator:
 
         result = Metrics(
             model_type=model_type,
+            recourse_method = recourse_method,
             delta_max=delta_max,
             lamb=lamb,
             alpha=alpha,
@@ -131,8 +134,9 @@ class CombinedEvaluator:
         self,
         value_object:ValueObject,
         query_size_pcts: List[float],
+        recourse_method: str = 'roar',
         num_epochs: int = 100,
-        model_type:str = 'simple'
+        model_type:str = 'simple',
     ) -> List[Metrics]:
 
         self.__print("\n" + "=" * 70)
@@ -157,9 +161,9 @@ class CombinedEvaluator:
                             self.__print(f"\n[{current}/{total}]")
 
                             result = self.run_single_combination(
-                                delta_max, lamb, alpha,norm,
-                                value_object.X_train, value_object.y_train, value_object.X_query, value_object.X_test, value_object.y_test,
-                                value_object.feature_names, query_pct,num_epochs,model_type = model_type
+                                delta_max = delta_max, lamb = lamb, alpha = alpha,norm = norm,
+                                X_train = value_object.X_train, y_train = value_object.y_train, X_query = value_object.X_query, X_test = value_object.X_test, y_test = value_object.y_test,
+                                feature_names = value_object.feature_names, recourse_method = recourse_method, query_size_pct = query_pct,num_epochs = num_epochs,model_type = model_type
                             )
 
                             if result is not None:

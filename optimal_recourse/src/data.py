@@ -57,8 +57,8 @@ class Dataset(ABC):
 class GermanDataset(Dataset):
     def __init__(self, seed = 0, n_folds = 5):
         super(GermanDataset, self).__init__(seed, n_folds)
-        self.X, self.y = self.create('../datasets/german.csv')
-        self.X_shift, self.y_shift = self.create('../datasets/corrected_german.csv')
+        self.X, self.y = self.create('../../datasets/german.csv')
+        self.X_shift, self.y_shift = self.create('../../datasets/corrected_german.csv')
         self.name = 'german'
         self.cat_features, self.num_features = list(range(3,7)), list(range(2))
         self.imm_features = [2]
@@ -81,7 +81,7 @@ class SBADataset(Dataset):
     def __init__(self, seed = 0, n_folds = 5):
         super(SBADataset, self).__init__(seed, n_folds)
         
-        df = pd.read_csv('../datasets/SBAcase.11.13.17.csv', sep=',').sample(frac=1, random_state=self.seed).fillna(-1)
+        df = pd.read_csv('../../datasets/SBAcase.11.13.17.csv', sep=',').sample(frac=1, random_state=self.seed).fillna(-1)
         df['NoDefault'] = 1-df['Default'].values
         df = df.drop(columns=['Selected', 'State','Name', 'BalanceGross', 'LowDoc', 'BankState', 'LoanNr_ChkDgt', 'MIS_Status', 'Default', 'Bank', 'City'])
         

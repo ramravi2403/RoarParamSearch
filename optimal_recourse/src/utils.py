@@ -127,11 +127,11 @@ def generate_nn_smoothness_predictions(theta_0: np.ndarray, theta_s: np.ndarray,
     theta_p_plus_2eps = np.clip(theta_s + 9*eps, theta_0-alpha, theta_0+alpha)
 
     predictions = [
-        (f'theta_s-2\epsilon', (theta_p_minus_2eps[:-1], theta_p_minus_2eps[[-1]])),
-        (f'theta_s-\epsilon', (theta_p_minus_eps[:-1], theta_p_minus_eps[[-1]])), 
+        (fr'theta_s-2\epsilon', (theta_p_minus_2eps[:-1], theta_p_minus_2eps[[-1]])),
+        (fr'theta_s-\epsilon', (theta_p_minus_eps[:-1], theta_p_minus_eps[[-1]])),
         ('theta_s', (theta_s[:-1], theta_s[[-1]])), 
-        (f'theta_s+\epsilon', (theta_p_plus_eps[:-1], theta_p_plus_eps[[-1]])), 
-        (f'theta_s+2\epsilon', (theta_p_plus_2eps[:-1], theta_p_plus_2eps[[-1]])),
+        (fr'theta_s+\epsilon', (theta_p_plus_eps[:-1], theta_p_plus_eps[[-1]])),
+        (fr'theta_s+2\epsilon', (theta_p_plus_2eps[:-1], theta_p_plus_2eps[[-1]])),
     ]
     return predictions
 
@@ -146,11 +146,11 @@ def generate_lr_smoothness_predictions(theta_0, theta_s, alpha):
     theta_p_plus_2eps = np.clip(theta_s + 9*eps, theta_0-alpha, theta_0+alpha)
 
     predictions = [
-        (f'theta_s-2\epsilon', (theta_p_minus_2eps[:-1], theta_p_minus_2eps[[-1]])),
-        (f'theta_s-\epsilon', (theta_p_minus_eps[:-1], theta_p_minus_eps[[-1]])), 
+        (fr'theta_s-2\epsilon', (theta_p_minus_2eps[:-1], theta_p_minus_2eps[[-1]])),
+        (fr'theta_s-\epsilon', (theta_p_minus_eps[:-1], theta_p_minus_eps[[-1]])),
         ('theta_s', (theta_s[:-1], theta_s[[-1]])), 
-        (f'theta_s+\epsilon', (theta_p_plus_eps[:-1], theta_p_plus_eps[[-1]])), 
-        (f'theta_s+2\epsilon', (theta_p_plus_2eps[:-1], theta_p_plus_2eps[[-1]])),
+        (fr'theta_s+\epsilon', (theta_p_plus_eps[:-1], theta_p_plus_eps[[-1]])),
+        (fr'theta_s+2\epsilon', (theta_p_plus_2eps[:-1], theta_p_plus_2eps[[-1]])),
     ]
     return predictions
 

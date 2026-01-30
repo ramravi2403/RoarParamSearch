@@ -83,9 +83,17 @@ def main():
 
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--output', type=str, default='combined_evaluation_results')
+    parser.add_argument('--recourse_method', type=str, default='roar')
     parser.add_argument('--quiet', action='store_true')
 
     args = parser.parse_args()
+    if args.recourse_method == 'optimal':
+        unsupported_norms = [n for n in args.norm_values if n not in [1, float('inf'), 'inf']]
+        if unsupported_norms:
+            raise ValueError(
+                f"The 'optimal' recourse method only supports L1 and L-inf norms. "
+                f"Unsupported norms provided: {unsupported_norms}"
+            )
     print("Loading data...")
     data_dir = Path(args.data_dir)
     X_train, y_train, X_query, y_query, X_test, y_test, feature_names = load_data(
@@ -107,6 +115,7 @@ def main():
     results = evaluator.evaluate(
         value_object,
         query_size_pcts=args.size_values,
+        recourse_method=args.recourse_method,
         num_epochs=args.epochs,
         model_type=args.model_type
     )

@@ -7,7 +7,7 @@ import torch.optim as optim
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from scipy.optimize import linprog, milp, LinearConstraint, Bounds, minimize
-from src.utils import *
+from .utils import *
 from torch.autograd import grad
 from typing import List, Callable
 

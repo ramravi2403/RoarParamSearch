@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import roc_auc_score, accuracy_score
 from models.ModelWrapper import ModelWrapper
+from optimal_recourse.src.recourse import Recourse, LARRecourse, ROARLInf
 from recourse_methods import RobustRecourse
 from recourse_utils import recourse_needed, lime_explanation
 
@@ -22,8 +23,11 @@ def generate_cfs_ccfs(
         query_size_pct: float = 1.0,
         random_seed: int = 42,
         verbose: bool = False,
+        recourse_method: str = 'roar',
         model_type: str = 'simple'
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict]:
+    if recourse_method not in ['roar', 'optimal']:
+        raise ValueError('recourse method needs to be roar or optimal')
     use_lime = (W is None or W0 is None)
     if use_lime and X_train is None:
         raise ValueError("X_train must be provided when using LIME (deep model)")
@@ -53,7 +57,13 @@ def generate_cfs_ccfs(
         )
     else:
         sampled_denied_indices = denied_indices
-    rr_cf = RobustRecourse(W=W, W0=W0, y_target=1, delta_max=delta_max)
+
+    rr_cf_persistent = None
+    rr_ccf_persistent = None
+
+    if recourse_method == 'roar':
+        rr_cf_persistent = RobustRecourse(W=W, W0=W0, y_target=1, delta_max=delta_max)
+        rr_ccf_persistent = RobustRecourse(W=W, W0=W0, y_target=0, delta_max=delta_max)
     cf_list = []
 
     for i in sampled_denied_indices:
@@ -65,21 +75,33 @@ def generate_cfs_ccfs(
                 probs, _ = baseline_model.predict(x)
                 probs = probs.flatten()
                 return np.vstack([1 - probs, probs]).T
-
             local_W, local_W0 = lime_explanation(predict_proba_fn, X_train, x_i)
-            rr_cf.set_W_lime(local_W)  #
-            rr_cf.set_W0_lime(local_W0)
         else:
-            rr_cf.set_W(W)
-            rr_cf.set_W0(W0)
+            local_W, local_W0 = W, W0
         try:
-            cf, _ = rr_cf.get_recourse(x_i, lamb=lamb, norm=norm,lime=use_lime)
-
-            if cf is None:
-                print(f"[DEBUG CF {i}] FAILED: Solver returned None")
+            if recourse_method == 'roar':
+                rr_cf_persistent.set_W_lime(local_W) if use_lime else rr_cf_persistent.set_W(local_W)
+                rr_cf_persistent.set_W0_lime(local_W0) if use_lime else rr_cf_persistent.set_W0(local_W0)
+                solver = rr_cf_persistent
             else:
-                _, cf_pred = baseline_model.predict(cf.reshape(1, -1))
-                print(f"[DEBUG CF {i}] SUCCESS: CF found. New Prediction: {cf_pred}")
+                if norm == 1:
+                    solver = LARRecourse(
+                        weights=local_W.flatten(),
+                        bias=local_W0.flatten(),
+                        alpha=delta_max,
+                        lamb=lamb
+                    )
+                elif norm in [float('inf'), 'inf']:
+                    solver = ROARLInf(
+                        weights=local_W.flatten(),
+                        bias=local_W0.flatten(),
+                        alpha=delta_max,
+                        lamb=lamb
+                    )
+            if recourse_method == 'roar':
+                cf, _ = solver.get_recourse(x_i, lamb=lamb, norm=norm, lime=use_lime)
+            else:
+                cf = solver.get_recourse(x_i)
             if cf.ndim == 1:
                 cf = cf.reshape(1, -1)
             dist = np.linalg.norm(cf.flatten() - x_i, ord=norm)
@@ -101,8 +123,6 @@ def generate_cfs_ccfs(
         return pd.DataFrame(), pd.DataFrame(), metrics
 
     cfs_df = pd.concat(cf_list, ignore_index=True)
-
-    rr_ccf = RobustRecourse(W=W, W0=W0, y_target=0, delta_max=delta_max)
     ccf_list = []
 
     for i in range(len(cfs_df)):
@@ -118,23 +138,36 @@ def generate_cfs_ccfs(
                 probs = probs.flatten()
                 return np.vstack([1 - probs, probs]).T
 
-            if verbose:
-                print(f"\n[DEBUG] Running LIME for CCF index {i}")
-
             local_W, local_W0 = lime_explanation(predict_proba_fn, X_train, x_cf)
-
-            if verbose:
-                print(f"[DEBUG] LIME Local W (first 5): {local_W[:5]}")
-                print(f"[DEBUG] LIME Intercept: {local_W0}")
-
-            rr_ccf.set_W_lime(local_W)
-            rr_ccf.set_W0_lime(local_W0)
         else:
-            rr_ccf.set_W(W)
-            rr_ccf.set_W0(W0)
+            local_W, local_W0 = W, W0
 
         try:
-            ccf, _ = rr_ccf.get_recourse(x_cf, lamb=lamb, norm=norm,lime=use_lime)
+            if recourse_method == 'roar':
+                rr_ccf_persistent.set_W_lime(local_W) if use_lime else rr_ccf_persistent.set_W(local_W)
+                rr_ccf_persistent.set_W0_lime(local_W0) if use_lime else rr_ccf_persistent.set_W0(local_W0)
+                solver_ccf = rr_ccf_persistent
+            else:
+                if norm == 1:
+                    solver_ccf = LARRecourse(
+                        weights=-local_W.flatten(),
+                        bias=-local_W0.flatten(),
+                        alpha=delta_max,
+                        lamb=lamb
+                    )
+                elif norm in [float('inf'), 'inf']:
+                    solver_ccf = ROARLInf(
+                        weights=-local_W.flatten(),
+                        bias=-local_W0.flatten(),
+                        alpha=delta_max,
+                        lamb=lamb
+                    )
+
+            if recourse_method == 'roar':
+                ccf, _ = solver_ccf.get_recourse(x_cf, lamb=lamb, norm=norm, lime=use_lime)
+            else:
+                ccf = solver_ccf.get_recourse(x_cf)
+
             if ccf.ndim == 1:
                 ccf = ccf.reshape(1, -1)
 
@@ -146,6 +179,7 @@ def generate_cfs_ccfs(
             ccf_df["original_query_idx"] = original_idx
             ccf_df["distance"] = dist
             ccf_list.append(ccf_df)
+
         except Exception as e:
             metrics['ccf_failures'] += 1
             if verbose:
