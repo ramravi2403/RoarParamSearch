@@ -83,11 +83,12 @@ def main():
 
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--output', type=str, default='combined_evaluation_results')
-    parser.add_argument('--recourse_method', type=str, default='roar')
+    parser.add_argument('--recourse_methods',nargs='+',default=['roar'],help="List of methods to run, e.g., --recourse_methods roar optimal"
+    )
     parser.add_argument('--quiet', action='store_true')
 
     args = parser.parse_args()
-    if args.recourse_method == 'optimal':
+    if 'optimal' in args.recourse_methods:
         unsupported_norms = [n for n in args.norm_values if n not in [1, float('inf'), 'inf']]
         if unsupported_norms:
             raise ValueError(
@@ -115,7 +116,7 @@ def main():
     results = evaluator.evaluate(
         value_object,
         query_size_pcts=args.size_values,
-        recourse_method=args.recourse_method,
+        recourse_methods=args.recourse_methods,
         num_epochs=args.epochs,
         model_type=args.model_type
     )

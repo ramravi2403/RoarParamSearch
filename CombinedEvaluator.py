@@ -24,7 +24,7 @@ class CombinedEvaluator:
 
     def run_single_combination(
             self,
-            vo: ValueObject,  # The DTO containing all data
+            vo: ValueObject,
             recourse_method: str,
             query_size_pct: float,
             num_epochs: int = 100,
@@ -86,7 +86,7 @@ class CombinedEvaluator:
             self,
             value_object: ValueObject,
             query_size_pcts: List[float],
-            recourse_method: str = 'roar',
+            recourse_methods: List[str],
             num_epochs: int = 100,
             model_type: str = 'simple',
     ) -> List[Metrics]:
@@ -100,37 +100,37 @@ class CombinedEvaluator:
 
         self.results = []
         current = 0
+        for recourse_method in recourse_methods:
+            for norm in value_object.norm_values:
+                for delta_max in value_object.delta_max_values:
+                    for lamb in value_object.lambda_values:
+                        for alpha in value_object.alpha_values:
+                            for query_pct in query_size_pcts:
+                                current += 1
+                                self.__print(f"\n[{current}/{total}]")
+                                single_context_vo = ValueObject(
+                                    delta_max_values=[delta_max],
+                                    lambda_values=[lamb],
+                                    alpha_values=[alpha],
+                                    norm_values=[norm],
+                                    X_train=value_object.X_train,
+                                    y_train=value_object.y_train,
+                                    X_query=value_object.X_query,
+                                    X_test=value_object.X_test,
+                                    y_test=value_object.y_test,
+                                    feature_names=value_object.feature_names
+                                )
 
-        for norm in value_object.norm_values:
-            for delta_max in value_object.delta_max_values:
-                for lamb in value_object.lambda_values:
-                    for alpha in value_object.alpha_values:
-                        for query_pct in query_size_pcts:
-                            current += 1
-                            self.__print(f"\n[{current}/{total}]")
-                            single_context_vo = ValueObject(
-                                delta_max_values=[delta_max],
-                                lambda_values=[lamb],
-                                alpha_values=[alpha],
-                                norm_values=[norm],
-                                X_train=value_object.X_train,
-                                y_train=value_object.y_train,
-                                X_query=value_object.X_query,
-                                X_test=value_object.X_test,
-                                y_test=value_object.y_test,
-                                feature_names=value_object.feature_names
-                            )
+                                result = self.run_single_combination(
+                                    vo=single_context_vo,
+                                    recourse_method=recourse_method,
+                                    query_size_pct=query_pct,
+                                    num_epochs=num_epochs,
+                                    model_type=model_type
+                                )
 
-                            result = self.run_single_combination(
-                                vo=single_context_vo,
-                                recourse_method=recourse_method,
-                                query_size_pct=query_pct,
-                                num_epochs=num_epochs,
-                                model_type=model_type
-                            )
-
-                            if result is not None:
-                                self.results.append(result)
+                                if result is not None:
+                                    self.results.append(result)
 
         return self.results
 
