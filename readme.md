@@ -12,6 +12,11 @@ This project builds upon and extends the following research and implementations:
   * *Authors:* Yongjie Wang, Hangwei Qian, Chunyan Miao.
   * *Reference:* [Proceedings of the 2022 ACM Conference on Fairness, Accountability, and Transparency (FAccT '22)](https://doi.org/10.1145/3531146.3533188)
 
+* **Optimal Robust Recourse with Lp-Bounded Model Change**
+  * *Authors:* Phone Kyaw, Kshitij Kayastha, Shahin Jabbari
+  * *Reference:* https://arxiv.org/abs/2509.21293
+  *  *Repository:* [Optimal-Robust-Recourse](https://github.com/PMyatKyaw/Optimal-Robust-Recourse/blob/main/)
+
 **Note:** The foundational recourse solvers and utility scripts in this repository are from the original ROAR implementation. This project extends those works by introducing deep model support via LIME linearization and parameter search evaluation.
 This repository implements the **ROAR (Robust Recourse)** framework for generating and evaluating counterfactual explanations. It supports both simple linear classifiers and deep non-linear neural networks, using **LIME** for local linearization when dealing with non-linear networks.
 
