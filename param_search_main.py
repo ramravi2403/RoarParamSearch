@@ -1,18 +1,17 @@
 import argparse
 from datetime import datetime
 from pathlib import Path
-
-import numpy as np
 import pandas as pd
 
 from CombinedEvaluator import CombinedEvaluator
 from ValueObject import ValueObject
+from logger.RunLogger import RunLogger
+import random
+import numpy as np
+import torch
 
 
 def set_seed(seed_value=42):
-    import random
-    import numpy as np
-    import torch
     random.seed(seed_value)
     np.random.seed(seed_value)
     torch.manual_seed(seed_value)
@@ -20,6 +19,8 @@ def set_seed(seed_value=42):
         torch.cuda.manual_seed_all(seed_value)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
+
+
 def load_data(data_dir: Path, train_file: str, query_file: str,
               test_file: str, label_column: str = "NoDefault"):
     train_df = pd.read_csv(data_dir / train_file)
@@ -49,6 +50,7 @@ def main():
         if value.lower() == 'inf':
             return float('inf')
         return int(value)
+
     set_seed(42)
     parser = argparse.ArgumentParser(
         description="Combined parameter evaluation: CF/CCF generation + extraction",
@@ -65,7 +67,7 @@ def main():
 
     # [0.0, 0.05, 0.1, 0.15, 0.2,]
     parser.add_argument('--delta-max-values', type=float, nargs='+',
-                        default=[0.0, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0,2.0],
+                        default=[0.0, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 2.0],
                         help='Robustness parameters (0.0 = non-robust)')
     # [0.1, 0.2, 0.3]
     parser.add_argument('--lamb-values', type=float, nargs='+',
@@ -73,7 +75,7 @@ def main():
                         help='Lambda cost tradeoff parameters')
     # [0.001, 0.005, 0.01, 0.05, 0.1]
     parser.add_argument('--alpha-values', type=float, nargs='+',
-                        default=[0.005,0.01,0.1],
+                        default=[0.005, 0.01, 0.1],
                         help='Learning rates for extraction')
     parser.add_argument('--size-values', type=float, nargs='+',
                         default=[0.2, 0.3, 0.5, 1.0],
@@ -83,26 +85,37 @@ def main():
 
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--output', type=str, default='combined_evaluation_results')
-    parser.add_argument('--recourse_methods',nargs='+',default=['roar'],help="List of methods to run, e.g., --recourse_methods roar optimal"
-    )
+    parser.add_argument('--recourse_methods', nargs='+', default=['roar'],
+                        help="List of methods to run, e.g., --recourse_methods roar optimal"
+                        )
     parser.add_argument('--quiet', action='store_true')
 
     args = parser.parse_args()
+    runs_root = Path("combined_evaluation_runs")
+    run_id = datetime.now().strftime("run_%Y%m%d_%H%M%S")
+    run_dir = runs_root / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    log_path = run_dir / "combined_evaluator.log"
+    logger = RunLogger(log_path=log_path, level=__import__("logging").INFO, also_console=True)
+    logger.info(f"Starting run: {run_id}")
+    logger.info(f"Run directory: {run_dir}")
     if 'optimal' in args.recourse_methods:
         unsupported_norms = [n for n in args.norm_values if n not in [1, float('inf'), 'inf']]
         if unsupported_norms:
+            logger.exception(f"The 'optimal' recourse method only supports L1 and L-inf norms. "
+                             f"Unsupported norms provided: {unsupported_norms}")
             raise ValueError(
                 f"The 'optimal' recourse method only supports L1 and L-inf norms. "
                 f"Unsupported norms provided: {unsupported_norms}"
             )
-    print("Loading data...")
+    logger.info("Loading data...")
     data_dir = Path(args.data_dir)
     X_train, y_train, X_query, y_query, X_test, y_test, feature_names = load_data(
         data_dir, args.train_file, args.query_file, args.test_file, args.label_column
     )
-    print(f"Train: {len(X_train)}, Query: {len(X_query)}, Test: {len(X_test)}")
+    logger.info(f"Train: {len(X_train)}, Query: {len(X_query)}, Test: {len(X_test)}")
 
-    evaluator = CombinedEvaluator(verbose=not args.quiet)
+    evaluator = CombinedEvaluator(verbose=not args.quiet,logger=logger)
     value_object = ValueObject(delta_max_values=args.delta_max_values,
                                lambda_values=args.lamb_values,
                                alpha_values=args.alpha_values,
@@ -121,14 +134,13 @@ def main():
         model_type=args.model_type
     )
 
-    evaluator.print_summary()
+    evaluator.log_summary()
 
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_dir = Path('combined_evaluation_runs') / f"run_{timestamp}"
+    output_dir = Path('combined_evaluation_runs') / f"run_{run_id}"
     output_dir.mkdir(parents=True, exist_ok=True)
     evaluator.save_results(output_dir / args.output)
 
-    print(f"\n✅ Evaluation complete! Results in: {output_dir.resolve()}")
+    logger.info(f"\n✅ Evaluation complete! Results in: {output_dir.resolve()}")
 
 
 if __name__ == "__main__":
