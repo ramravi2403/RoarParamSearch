@@ -18,7 +18,8 @@ This project builds upon and extends the following research and implementations:
   *  *Repository:* [Optimal-Robust-Recourse](https://github.com/PMyatKyaw/Optimal-Robust-Recourse/blob/main/)
 
 **Note:** The foundational recourse solvers and utility scripts in this repository are from the original ROAR implementation. This project extends those works by introducing deep model support via LIME linearization and parameter search evaluation.
-This repository implements the **ROAR (Robust Recourse)** framework for generating and evaluating counterfactual explanations. It supports both simple linear classifiers and deep non-linear neural networks, using **LIME** for local linearization when dealing with non-linear networks.
+This repository implements a recourse param search framework supporting both **ROAR (Robust Recourse)** and **Optimal Robust Recourse** methods for generating and evaluating counterfactual explanations.
+
 
 ---
 
@@ -56,12 +57,39 @@ python param_search_main.py \
   --epochs 50
 ```
 
+### 3. Choosing a Recourse Method
+
+This framework supports **multiple recourse optimization objectives** that influence how counterfactuals are generated and what information about the model is exposed:
+
+| Method | Description |
+|--------|-------------|
+| `roar` | **ROAR (Robust and Reliable Algorithmic Recourse)** — gradient-based robust optimization. Produces counterfactuals that explore the model’s confidence landscape. |
+| `optimal` | **Optimal Robust Recourse** — minimal perturbation formulation that targets the decision boundary directly. Produces boundary-focused counterfactuals. |
+
+These methods can be selected via (Note only L1 and inf supported for optimal at the moment):
+
+```bash
+--recourse-methods roar optimal
+
+
+
+python param_search_main.py \
+  --model-type deep \
+  --recourse-methods roar optimal \
+  --norm-values 1 inf \
+  --delta-max-values 2 \
+  --lamb-values 0.2 \
+  --alpha-values 0.01 \
+  --size-values 1.0 \
+  --epochs 100
+
 
 ### 3. Arguments Reference
 
 | Argument | Description |
 | :--- | :--- |
 | `--model-type` | Model architecture to use (`simple` or `deep`). |
+| `--recourse_methods` | Model architecture to use (`roar` and/or `optimal`). |
 | `--norm-values` | Distance norms to evaluate: `1` (Manhattan), `2` (Euclidean), or `inf` . |
 | `--delta-max-values` | Robustness budget ($\delta$) for the optimizer. |
 | `--lamb-values` | Trade-off between validity and distance cost. |
@@ -78,3 +106,6 @@ python param_search_main.py \
 | `CombinedEvaluator.py` | **Orchestrator** of the experimental pipeline (training through extraction analysis). |
 | `models/ModelWrapper.py` | **Unified interface** supporting different classifier architectures (Linear vs. Deep). |
 | `recourse_utils.py` | **Utilities** for data processing and LIME explanation generation. |
+
+
+
