@@ -136,7 +136,7 @@ def main():
 
     evaluator.log_summary()
 
-    output_dir = Path('combined_evaluation_runs') / f"run_{run_id}"
+    output_dir = Path('combined_evaluation_runs') / f"{run_id}"
     output_dir.mkdir(parents=True, exist_ok=True)
     evaluator.save_results(output_dir / args.output)
 

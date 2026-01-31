@@ -43,3 +43,18 @@ class RunLogger:
 
     def exception(self, msg: str):
         self._logger.exception(msg)
+
+    def log(self, message: str, level: str = "info"):
+        level = level.lower()
+        if level == "debug":
+            self.debug(message)
+        elif level == "info":
+            self.info(message)
+        elif level == "warning":
+            self.warning(message)
+        elif level == "error":
+            self.error(message)
+        elif level == "exception":
+            self.exception(message)
+        else:
+            self.info(message)

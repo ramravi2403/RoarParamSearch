@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from Metrics import Metrics
 from ValueObject import ValueObject
-from counterfactual_metrics import generate_cfs_ccfs, evaluate_extraction, calculate_quality_score, generate_cfs_ccfs2
+from counterfactual_metrics import evaluate_extraction, calculate_quality_score, generate_cfs_ccfs
 from logger.RunLogger import RunLogger
 from models.ModelWrapper import ModelWrapper
 
@@ -18,19 +18,11 @@ class CombinedEvaluator:
     def __init__(self, verbose: bool = True, logger: Optional[RunLogger] = None):
         self.verbose = verbose
         self.results: List[Metrics] = []
-        self.logger = logger
-
-    def __print(self, message: str):
-        if self.verbose:
-            print(message)
+        self.__logger = logger
 
     def __log(self, message: str, level: str = "info"):
-        """
-        Logs to RunLogger if present, otherwise falls back to print if verbose.
-        level: "debug" | "info" | "warning" | "error"
-        """
-        if self.logger is not None:
-            getattr(self.logger, level)(message)
+        if self.__logger is not None:
+            getattr(self.__logger, level)(message)
         elif self.verbose:
             print(message)
 
@@ -47,18 +39,18 @@ class CombinedEvaluator:
         baseline_model.train(vo.X_train, vo.y_train, num_epochs=num_epochs, lr=vo.alpha_values[0], verbose=False)
         W, W0 = baseline_model.extract_weights() if model_type == 'simple' else (None, None)
 
-        cfs_df, ccfs_df, gen_metrics = generate_cfs_ccfs2(
-            vo, baseline_model, W, W0, query_size_pct, recourse_method
-        )
+        cfs_df, ccfs_df, gen_metrics = generate_cfs_ccfs(self.__logger,
+                                                         vo, baseline_model, W, W0, query_size_pct, recourse_method
+                                                         )
 
         if len(cfs_df) == 0 or len(ccfs_df) == 0:
             return None
 
-        ext_metrics = evaluate_extraction(
-            cfs_df, ccfs_df, vo.X_test, vo.y_test, baseline_model,
-            vo.feature_names, vo.alpha_values[0], vo.X_train, vo.y_train,
-            num_epochs, model_type=model_type
-        )
+        ext_metrics = evaluate_extraction(self.__logger,
+                                          cfs_df, ccfs_df, vo.X_test, vo.y_test, baseline_model,
+                                          vo.feature_names, vo.alpha_values[0], vo.X_train, vo.y_train,
+                                          num_epochs, model_type=model_type
+                                          )
 
         cf_dists = np.array(gen_metrics['cf_distances'])
         ccf_dists = np.array(gen_metrics['ccf_distances'])
@@ -103,9 +95,9 @@ class CombinedEvaluator:
             model_type: str = 'simple',
     ) -> List[Metrics]:
 
-        self.__log("   COMBINED PARAMETER EVALUATION", "info")
+        self.__logger.log("   COMBINED PARAMETER EVALUATION", "info")
         total = (len(value_object.delta_max_values) * len(value_object.lambda_values) * len(
-            value_object.alpha_values) * len(query_size_pcts) * len(value_object.norm_values))
+            value_object.alpha_values) * len(query_size_pcts) * len(value_object.norm_values) * len(recourse_methods))
 
         self.results = []
         current = 0
@@ -116,7 +108,7 @@ class CombinedEvaluator:
                         for alpha in value_object.alpha_values:
                             for query_pct in query_size_pcts:
                                 current += 1
-                                self.__log(f"\n[{current}/{total}]")
+                                self.__logger.log(f"\n[{current}/{total}]")
                                 single_context_vo = ValueObject(
                                     delta_max_values=[delta_max],
                                     lambda_values=[lamb],
@@ -150,73 +142,74 @@ class CombinedEvaluator:
 
         df = pd.DataFrame([asdict(r) for r in self.results])
 
-        self.__log("\n" + "=" * 70)
-        self.__log("   SUMMARY: BEST RESULTS")
-        self.__log("=" * 70)
+        self.__logger.log("\n" + "=" * 70)
+        self.__logger.log("   SUMMARY: BEST RESULTS")
+        self.__logger.log("=" * 70)
 
         best_quality = df.loc[df['quality_score'].idxmax()]
-        self.__log("\n🏆 Best Overall Quality Score:")
-        self.__log(
+        self.__logger.log("\n🏆 Best Overall Quality Score:")
+        self.__logger.log(
             f"  δ_max={best_quality['delta_max']:.3f}, λ={best_quality['lamb']:.3f}, α={best_quality['alpha']:.5f}, Norm={best_quality['norm']}")
-        self.__log(f"  Quality: {best_quality['quality_score']:.4f}")
-        self.__log(
+        self.__logger.log(f"  Quality: {best_quality['quality_score']:.4f}")
+        self.__logger.log(
             f"  Dist ({best_quality['norm']}): {best_quality['cf_mean_distance']:.4f}, Extracted Acc: {best_quality['extracted_accuracy']:.4f}")
 
         best_dist = df.loc[df['cf_mean_distance'].idxmin()]
-        self.__log(f"\n Lowest CF Distance (Relative to Norm):")
-        self.__log(f"  δ_max={best_dist['delta_max']:.3f}, λ={best_dist['lamb']:.3f}, Norm={best_dist['norm']}")
-        self.__log(f"  Distance ({best_dist['norm']}): {best_dist['cf_mean_distance']:.4f}")
-        self.__log(
+        self.__logger.log(f"\n Lowest CF Distance (Relative to Norm):")
+        self.__logger.log(f"  δ_max={best_dist['delta_max']:.3f}, λ={best_dist['lamb']:.3f}, Norm={best_dist['norm']}")
+        self.__logger.log(f"  Distance ({best_dist['norm']}): {best_dist['cf_mean_distance']:.4f}")
+        self.__logger.log(
             f"  Extracted Acc: {best_dist['extracted_accuracy']:.4f}, Quality: {best_dist['quality_score']:.4f}")
 
         best_acc = df.loc[df['extracted_accuracy'].idxmax()]
-        self.__log("\n Highest Extraction Accuracy:")
-        self.__log(f"  δ_max={best_acc['delta_max']:.3f}, α={best_acc['alpha']:.5f}, Norm={best_acc['norm']}")
-        self.__log(f"  Extracted Acc: {best_acc['extracted_accuracy']:.4f}")
-        self.__log(
+        self.__logger.log("\n Highest Extraction Accuracy:")
+        self.__logger.log(f"  δ_max={best_acc['delta_max']:.3f}, α={best_acc['alpha']:.5f}, Norm={best_acc['norm']}")
+        self.__logger.log(f"  Extracted Acc: {best_acc['extracted_accuracy']:.4f}")
+        self.__logger.log(
             f"  Dist ({best_acc['norm']}): {best_acc['cf_mean_distance']:.4f}, Quality: {best_acc['quality_score']:.4f}")
 
         best_agree = df.loc[df['extracted_agreement'].idxmax()]
-        self.__log("\n Highest Agreement with Baseline:")
-        self.__log(f"  δ_max={best_agree['delta_max']:.3f}, α={best_agree['alpha']:.5f}, Norm={best_agree['norm']}")
-        self.__log(f"  Agreement: {best_agree['extracted_agreement']:.4f}")
-        self.__log(
+        self.__logger.log("\n Highest Agreement with Baseline:")
+        self.__logger.log(
+            f"  δ_max={best_agree['delta_max']:.3f}, α={best_agree['alpha']:.5f}, Norm={best_agree['norm']}")
+        self.__logger.log(f"  Agreement: {best_agree['extracted_agreement']:.4f}")
+        self.__logger.log(
             f"  Dist ({best_agree['norm']}): {best_agree['cf_mean_distance']:.4f}, Quality: {best_agree['quality_score']:.4f}")
 
-        self.__log("\n" + "=" * 70)
-        self.__log("   ANALYSIS: Impact of Norm Type")
-        self.__log("=" * 70)
+        self.__logger.log("\n" + "=" * 70)
+        self.__logger.log("   ANALYSIS: Impact of Norm Type")
+        self.__logger.log("=" * 70)
         for norm in sorted(df['norm'].unique(), key=lambda x: float(x)):
             subset = df[df['norm'] == norm]
-            self.__log(f"\nNorm = {norm}:")
-            self.__log(f"  Mean Distance: {subset['cf_mean_distance'].mean():.4f}")
-            self.__log(f"  Mean Extracted Acc: {subset['extracted_accuracy'].mean():.4f}")
-            self.__log(f"  Mean Agreement: {subset['extracted_agreement'].mean():.4f}")
+            self.__logger.log(f"\nNorm = {norm}:")
+            self.__logger.log(f"  Mean Distance: {subset['cf_mean_distance'].mean():.4f}")
+            self.__logger.log(f"  Mean Extracted Acc: {subset['extracted_accuracy'].mean():.4f}")
+            self.__logger.log(f"  Mean Agreement: {subset['extracted_agreement'].mean():.4f}")
 
-        self.__log("\n" + "=" * 70)
-        self.__log("   ANALYSIS: Impact of Robustness (δ_max)")
-        self.__log("=" * 70)
+        self.__logger.log("\n" + "=" * 70)
+        self.__logger.log("   ANALYSIS: Impact of Robustness (δ_max)")
+        self.__logger.log("=" * 70)
         for delta in sorted(df['delta_max'].unique()):
             subset = df[df['delta_max'] == delta]
-            self.__log(f"\nδ_max = {delta:.3f}:")
-            self.__log(
+            self.__logger.log(f"\nδ_max = {delta:.3f}:")
+            self.__logger.log(
                 f"  Mean Distance: {subset['cf_mean_distance'].mean():.4f} ± {subset['cf_mean_distance'].std():.4f}")
-            self.__log(f"  Mean Extracted Acc: {subset['extracted_accuracy'].mean():.4f}")
-            self.__log(f"  Mean Quality: {subset['quality_score'].mean():.4f}")
+            self.__logger.log(f"  Mean Extracted Acc: {subset['extracted_accuracy'].mean():.4f}")
+            self.__logger.log(f"  Mean Quality: {subset['quality_score'].mean():.4f}")
 
-        self.__log("\n" + "=" * 70)
-        self.__log("   ANALYSIS: Impact of Query Set Size")
-        self.__log("=" * 70)
+        self.__logger.log("\n" + "=" * 70)
+        self.__logger.log("   ANALYSIS: Impact of Query Set Size")
+        self.__logger.log("=" * 70)
         for size_pct in sorted(df['query_size_pct'].unique()):
             subset = df[df['query_size_pct'] == size_pct]
             n_cfs_avg = subset['n_cfs_generated'].mean()
             n_ccfs_avg = subset['n_ccfs_generated'].mean()
 
-            self.__log(f"\nQuery Size = {size_pct * 100:.0f}% (avg {n_cfs_avg:.0f} CFs):")
-            self.__log(f"  Mean Distance: {subset['cf_mean_distance'].mean():.4f}")
-            self.__log(f"  Mean Extracted Acc: {subset['extracted_accuracy'].mean():.4f}")
-            self.__log(f"  Mean Agreement: {subset['extracted_agreement'].mean():.4f}")
-            self.__log(f"  CF Success Rate: {subset['cf_success_rate'].mean():.2%}")
+            self.__logger.log(f"\nQuery Size = {size_pct * 100:.0f}% (avg {n_cfs_avg:.0f} CFs):")
+            self.__logger.log(f"  Mean Distance: {subset['cf_mean_distance'].mean():.4f}")
+            self.__logger.log(f"  Mean Extracted Acc: {subset['extracted_accuracy'].mean():.4f}")
+            self.__logger.log(f"  Mean Agreement: {subset['extracted_agreement'].mean():.4f}")
+            self.__logger.log(f"  CF Success Rate: {subset['cf_success_rate'].mean():.2%}")
 
     def save_results(self, output_path: Path):
         output_path = Path(output_path)
@@ -235,6 +228,6 @@ class CombinedEvaluator:
         df = pd.DataFrame([asdict(r) for r in self.results])
         df.to_csv(csv_path, index=False)
 
-        self.__log(f"\n Results saved:")
-        self.__log(f"   JSON: {json_path}")
-        self.__log(f"   CSV: {csv_path}")
+        self.__logger.log(f"\n Results saved:")
+        self.__logger.log(f"   JSON: {json_path}")
+        self.__logger.log(f"   CSV: {csv_path}")
