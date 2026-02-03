@@ -19,7 +19,6 @@ def parse_args():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
 
-    # Input/Output
     parser.add_argument(
         "--input",
         type=str,
@@ -33,7 +32,6 @@ def parse_args():
         help="Directory to save processed .npy files"
     )
 
-    # Feature configuration
     parser.add_argument(
         "--feature-mode",
         type=str,
@@ -44,12 +42,11 @@ def parse_args():
     parser.add_argument(
         "--keep-approvalfy",
         action="store_true",
-        default=False,  # Changed default to False
+        default=False,
         help="Keep ApprovalFY as a feature (default: False to prevent temporal leakage). "
              "ApprovalFY is always used for chronological sorting when needed."
     )
 
-    # Split configuration
     parser.add_argument(
         "--split-strategy",
         type=str,
@@ -76,7 +73,6 @@ def parse_args():
         help="Proportion of data for query set (0-1)"
     )
 
-    # Experimental options
     parser.add_argument(
         "--introduce-leakage",
         action="store_true",
@@ -89,7 +85,6 @@ def parse_args():
         help="Fold number for stratified splits (affects random seed)"
     )
 
-    # Convenience presets
     parser.add_argument(
         "--preset",
         type=str,
@@ -99,12 +94,10 @@ def parse_args():
 
     args = parser.parse_args()
 
-    # Validate ratios
     total_ratio = args.train_ratio + args.test_ratio + args.query_ratio
-    if not (0.99 <= total_ratio <= 1.01):  # Allow small floating point errors
+    if not (0.99 <= total_ratio <= 1.01):
         parser.error(f"Ratios must sum to 1.0, got {total_ratio:.4f}")
 
-    # Apply presets if specified
     if args.preset:
         args = apply_preset(args)
 

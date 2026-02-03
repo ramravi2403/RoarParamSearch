@@ -112,11 +112,13 @@ def evaluate_extraction(
         baseline_model: ModelWrapper,
         feature_names: List[str],
         alpha: float,
+        recourse_method:str,
         X_train=None,
         y_train=None,
         num_epochs: int = 50,
         verbose: bool = False,
         model_type:str ="simple"
+
 
 ) -> Dict:
     """Train extracted and augmented models, evaluate on test set."""
@@ -142,6 +144,20 @@ def evaluate_extraction(
 
     baseline_probs, baseline_preds = baseline_model.predict(X_test)
     extracted_probs, extracted_preds = extracted_model.predict(X_test)
+    if verbose:
+        logger.info(f">>> Raw Prediction Audit [Method: {recourse_method}] | Model {model_type}")
+        n_pos = np.sum(y_test == 1)
+        n_neg = np.sum(y_test == 0)
+        logger.info(f"Test Set Balance: {n_pos} Positives (Approvals), {n_neg} Negatives (Defaults)")
+        for i in range(len(y_test)):
+            log_msg = (
+                f"Sample {i} | True: {y_test[i]} | "
+                f"Base Prob: {baseline_probs[i]:.4f} (Pred: {baseline_preds[i]}) | "
+                f"Extracted Prob: {extracted_probs[i]:.4f} (Pred: {extracted_preds[i]})"
+            )
+            logger.info(log_msg)
+
+        logger.info(f"Extracted Probs - Mean: {np.mean(extracted_probs):.4f}, Std: {np.std(extracted_probs):.4f}")
 
     extracted_acc = accuracy_score(y_test, extracted_preds)
     extracted_auc = roc_auc_score(y_test, extracted_probs) if len(np.unique(y_test)) > 1 else 0.0

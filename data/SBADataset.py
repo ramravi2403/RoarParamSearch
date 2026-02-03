@@ -3,7 +3,7 @@ from typing import Tuple, List, Literal
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
-from .Dataset import Dataset
+from Dataset import Dataset
 
 
 class SBADataset(Dataset):
@@ -17,7 +17,6 @@ class SBADataset(Dataset):
     - Optional data leakage mode for experimentation
     """
 
-    # Minimal feature configuration
     MINIMAL_FEATURES = [
         "Term", "NoEmp", "CreateJob", "RetainedJob",
         "Portion", "RealEstate", "RevLineCr"
@@ -25,15 +24,11 @@ class SBADataset(Dataset):
     MINIMAL_CONT_COLS = ["Term", "NoEmp", "CreateJob", "RetainedJob", "Portion"]
     MINIMAL_BIN_COLS = ["RealEstate", "RevLineCr"]
 
-    # Full feature configuration - columns to drop
     DROPPED_COLS = [
         "Selected", "State", "Name", "BalanceGross", "LowDoc",
         "BankState", "LoanNr_ChkDgt", "MIS_Status", "Default",
         "Bank", "City"
     ]
-
-    # Note: ApprovalFY is kept for chronological sorting but dropped as a feature by default
-    # to prevent temporal leakage. Use keep_approvalfy=True to override this behavior.
 
     TARGET = "NoDefault"
 
@@ -81,19 +76,14 @@ class SBADataset(Dataset):
         Returns:
             X_train, y_train, X_test, y_test, X_query, y_query
         """
-        # Validate ratios
         if not np.isclose(train_ratio + test_ratio + query_ratio, 1.0):
             raise ValueError(f"Ratios must sum to 1.0, got {train_ratio + test_ratio + query_ratio}")
 
         os.makedirs(save_dir, exist_ok=True)
-
-        # Load and prepare data
         df = self.load_data(file_name)
-
-        # Process based on feature mode
         if self.feature_mode == "minimal":
             df, feature_names, cont_cols = self._process_minimal_features(df)
-        else:  # full
+        else:
             df, feature_names, cont_cols = self._process_full_features(df)
 
         X_train, y_train, X_test, y_test, X_query, y_query = self._split_data(
@@ -110,9 +100,6 @@ class SBADataset(Dataset):
                         X_test[col] = self.scaler.transform(X_test[[col]])
                         X_query[col] = self.scaler.transform(X_query[[col]])
         else:
-            # Scale only on training data (correct approach, matches paper)
-            # Paper: "df1, df2 = self.scale_num_feats(df1, df2, num_feat)"
-            # This fits on df1 (train) and transforms both df1 and df2
             if len(cont_cols) > 0:
                 for col in cont_cols:
                     if col in X_train.columns:
@@ -121,19 +108,14 @@ class SBADataset(Dataset):
                         X_test[col] = scaler.transform(X_test[[col]])
                         X_query[col] = scaler.transform(X_query[[col]])
 
-        # Drop ApprovalFY after scaling if needed
-        # In full mode: drop by default unless keep_approvalfy=True
-        # In minimal mode: always drop (it's not in the feature list anyway)
         should_drop_approvalfy = not (self.feature_mode == "full" and self.keep_approvalfy)
         if should_drop_approvalfy and "ApprovalFY" in X_train.columns:
             X_train = X_train.drop(columns=["ApprovalFY"])
             X_test = X_test.drop(columns=["ApprovalFY"])
             X_query = X_query.drop(columns=["ApprovalFY"])
 
-        # Update feature_names to match actual columns in X_train
         feature_names = X_train.columns.tolist()
 
-        # Save to disk
         self._save_datasets(
             save_dir, X_train, y_train, X_test, y_test,
             X_query, y_query, feature_names
@@ -143,13 +125,11 @@ class SBADataset(Dataset):
 
     def _process_minimal_features(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str], List[str]]:
         """Process dataset with minimal 7 features."""
-        # Build target
         if self.TARGET not in df.columns:
             if "Default" not in df.columns:
                 raise ValueError("Dataset must have either 'NoDefault' or 'Default' column.")
             df[self.TARGET] = 1 - df["Default"].astype(int)
 
-        # Check for missing features
         missing = [c for c in self.MINIMAL_FEATURES if c not in df.columns]
         if missing:
             if "Portion" in missing and {"SBA_Appv", "GrAppv"}.issubset(df.columns):
@@ -158,21 +138,17 @@ class SBADataset(Dataset):
             if missing:
                 raise ValueError(f"Missing required columns: {missing}")
 
-        # Keep only needed columns + ApprovalFY if present (for chronological split)
         cols_needed = self.MINIMAL_FEATURES + [self.TARGET]
         if "ApprovalFY" in df.columns:
             cols_needed.append("ApprovalFY")
         work = df[cols_needed].copy()
 
-        # Normalize binary features
         work["RevLineCr"] = work["RevLineCr"].apply(self._normalize_revlinecr).astype(int)
         work["RealEstate"] = work["RealEstate"].fillna(0).astype(int).clip(0, 1)
 
-        # Clean Portion
         work["Portion"] = pd.to_numeric(work["Portion"], errors="coerce")
         work["Portion"] = work["Portion"].clip(lower=0.0, upper=1.0)
 
-        # Drop rows with missing values
         work = work.dropna(subset=self.MINIMAL_FEATURES + [self.TARGET]).reset_index(drop=True)
 
         return work, self.MINIMAL_FEATURES.copy(), self.MINIMAL_CONT_COLS.copy()
@@ -182,25 +158,21 @@ class SBADataset(Dataset):
         Process dataset with full feature set and one-hot encoding.
         Mimics the ROAR paper's TemporalShift preprocessing.
         """
-        # Build target
         if "Default" not in df.columns:
             raise ValueError("Dataset must have 'Default' column.")
         df[self.TARGET] = 1 - df["Default"].values
         df = df.fillna(-1)
 
-        # Drop specified columns (matches paper)
         drop_cols = [col for col in self.DROPPED_COLS if col in df.columns]
         if "Default" in df.columns:
             drop_cols.append("Default")
         df = df.drop(columns=list(set(drop_cols)))
         work = df.drop(columns=[self.TARGET]).copy()
         if "ApprovalFY" in work.columns:
-            work = work.drop(columns=["ApprovalFY"])  # Don't include ApprovalFY in feature type detection
+            work = work.drop(columns=["ApprovalFY"])
         cat_feat, num_feat = self._get_feat_types(work)
         df = pd.get_dummies(df, columns=cat_feat)
         if "ApprovalFY" in df.columns and "ApprovalFY" not in num_feat:
-            # ApprovalFY is numeric but might not be in num_feat if it has <=2 unique values
-            # Check if it should be included
             if len(df["ApprovalFY"].unique()) > 2:
                 num_feat = num_feat + ["ApprovalFY"]
 
@@ -218,7 +190,7 @@ class SBADataset(Dataset):
 
         if self.split_strategy == "chronological":
             return self._chronological_split(df, train_ratio, test_ratio, query_ratio)
-        else:  # stratified
+        else:
             return self._stratified_three_way_split(df, train_ratio, test_ratio, query_ratio)
 
     def _chronological_split(
@@ -237,14 +209,12 @@ class SBADataset(Dataset):
         if "ApprovalFY" not in df.columns:
             raise ValueError("DataFrame must contain 'ApprovalFY' for chronological split.")
 
-        # Sort by ApprovalFY (ascending = oldest to newest)
         df_sorted = df.sort_values(by="ApprovalFY", ascending=True).reset_index(drop=True)
 
         n = len(df_sorted)
         train_end = int(train_ratio * n)
         test_end = train_end + int(test_ratio * n)
 
-        # Keep ApprovalFY in the data for now (will be dropped later if needed)
         X = df_sorted.drop(columns=[self.TARGET])
         y = df_sorted[self.TARGET]
 
@@ -267,7 +237,6 @@ class SBADataset(Dataset):
         X = df.drop(columns=[self.TARGET])
         y = df[self.TARGET].astype(int)
 
-        # First split: train vs (test + query)
         X_train, X_temp, y_train, y_temp = train_test_split(
             X, y,
             test_size=(test_ratio + query_ratio),
@@ -275,7 +244,6 @@ class SBADataset(Dataset):
             random_state=42 + self.fold
         )
 
-        # Second split: test vs query
         test_size_adjusted = test_ratio / (test_ratio + query_ratio)
         X_test, X_query, y_test, y_query = train_test_split(
             X_temp, y_temp,
@@ -291,7 +259,6 @@ class SBADataset(Dataset):
         if len(cont_cols) == 0:
             return X
 
-        # Only scale columns that actually exist in X
         cols_to_scale = [col for col in cont_cols if col in X.columns]
 
         if len(cols_to_scale) == 0:

@@ -47,9 +47,9 @@ class CombinedEvaluator:
             return None
 
         ext_metrics = evaluate_extraction(self.__logger,
-                                          cfs_df, ccfs_df, vo.X_test, vo.y_test, baseline_model,
-                                          vo.feature_names, vo.alpha_values[0], vo.X_train, vo.y_train,
-                                          num_epochs, model_type=model_type
+                                          cfs_df = cfs_df, ccfs_df = ccfs_df, X_test = vo.X_test, y_test = vo.y_test, baseline_model = baseline_model,
+                                          feature_names = vo.feature_names, alpha = vo.alpha_values[0], recourse_method = recourse_method, X_train = vo.X_train, y_train = vo.y_train,
+                                          num_epochs = num_epochs, verbose = self.verbose,model_type=model_type
                                           )
 
         cf_dists = np.array(gen_metrics['cf_distances'])

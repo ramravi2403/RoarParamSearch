@@ -88,7 +88,7 @@ def main():
     parser.add_argument('--recourse_methods', nargs='+', default=['roar'],
                         help="List of methods to run, e.g., --recourse_methods roar optimal"
                         )
-    parser.add_argument('--quiet', action='store_true')
+    parser.add_argument('--quiet', action='store_true',default = False)
 
     args = parser.parse_args()
     runs_root = Path("combined_evaluation_runs")
