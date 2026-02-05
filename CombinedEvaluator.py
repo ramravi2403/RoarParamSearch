@@ -55,6 +55,7 @@ class CombinedEvaluator:
         cf_dists = np.array(gen_metrics['cf_distances'])
         ccf_dists = np.array(gen_metrics['ccf_distances'])
 
+
         return Metrics(
             model_type=model_type,
             recourse_method=recourse_method,
@@ -64,8 +65,8 @@ class CombinedEvaluator:
             norm=vo.norm_values[0],
             n_cfs_generated=len(cfs_df),
             n_ccfs_generated=len(ccfs_df),
-            cf_success_rate=gen_metrics['cf_success'] / len(vo.X_query),
-            ccf_success_rate=gen_metrics['ccf_success'] / len(cfs_df),
+            cf_success_rate=gen_metrics['cf_success_rate'],
+            ccf_success_rate=gen_metrics['ccf_success_rate'],
             cf_mean_distance=float(np.mean(cf_dists)),
             cf_std_distance=float(np.std(cf_dists)),
             cf_min_distance=float(np.min(cf_dists)),
@@ -91,47 +92,50 @@ class CombinedEvaluator:
             value_object: ValueObject,
             query_size_pcts: List[float],
             recourse_methods: List[str],
+            model_types: List[str],
             num_epochs: int = 100,
-            model_type: str = 'simple',
     ) -> List[Metrics]:
 
         self.__logger.log("   COMBINED PARAMETER EVALUATION", "info")
-        total = (len(value_object.delta_max_values) * len(value_object.lambda_values) * len(
+        total = (len(model_types) * len(value_object.delta_max_values) * len(value_object.lambda_values) * len(
             value_object.alpha_values) * len(query_size_pcts) * len(value_object.norm_values) * len(recourse_methods))
 
         self.results = []
         current = 0
-        for recourse_method in recourse_methods:
-            for norm in value_object.norm_values:
-                for delta_max in value_object.delta_max_values:
-                    for lamb in value_object.lambda_values:
-                        for alpha in value_object.alpha_values:
-                            for query_pct in query_size_pcts:
-                                current += 1
-                                self.__logger.log(f"\n[{current}/{total}]")
-                                single_context_vo = ValueObject(
-                                    delta_max_values=[delta_max],
-                                    lambda_values=[lamb],
-                                    alpha_values=[alpha],
-                                    norm_values=[norm],
-                                    X_train=value_object.X_train,
-                                    y_train=value_object.y_train,
-                                    X_query=value_object.X_query,
-                                    X_test=value_object.X_test,
-                                    y_test=value_object.y_test,
-                                    feature_names=value_object.feature_names
-                                )
+        for model_type in model_types:
+            for recourse_method in recourse_methods:
+                for norm in value_object.norm_values:
+                    for delta_max in value_object.delta_max_values:
+                        for lamb in value_object.lambda_values:
+                            for alpha in value_object.alpha_values:
+                                for query_pct in query_size_pcts:
+                                    self.__logger.info(f"Running for config {recourse_method}|{model_type}|L-{norm}|delta-max-{delta_max}|"
+                                                       f"\nlambda-{lamb}|learning_rate-{alpha}|query-size-{query_pct}")
+                                    current += 1
+                                    self.__logger.log(f"\n[{current}/{total}]")
+                                    single_context_vo = ValueObject(
+                                        delta_max_values=[delta_max],
+                                        lambda_values=[lamb],
+                                        alpha_values=[alpha],
+                                        norm_values=[norm],
+                                        X_train=value_object.X_train,
+                                        y_train=value_object.y_train,
+                                        X_query=value_object.X_query,
+                                        X_test=value_object.X_test,
+                                        y_test=value_object.y_test,
+                                        feature_names=value_object.feature_names
+                                    )
 
-                                result = self.run_single_combination(
-                                    vo=single_context_vo,
-                                    recourse_method=recourse_method,
-                                    query_size_pct=query_pct,
-                                    num_epochs=num_epochs,
-                                    model_type=model_type
-                                )
+                                    result = self.run_single_combination(
+                                        vo=single_context_vo,
+                                        recourse_method=recourse_method,
+                                        query_size_pct=query_pct,
+                                        num_epochs=num_epochs,
+                                        model_type=model_type
+                                    )
 
-                                if result is not None:
-                                    self.results.append(result)
+                                    if result is not None:
+                                        self.results.append(result)
 
         return self.results
 

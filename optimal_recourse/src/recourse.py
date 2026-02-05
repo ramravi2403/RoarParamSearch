@@ -1,4 +1,6 @@
 import sys
+
+import pandas as pd
 import tqdm
 import torch
 import numpy as np
@@ -426,10 +428,10 @@ class ROARL1(Recourse):
         return x_r.detach().numpy()
     
 class L1Recourse(Recourse):
-    def __init__(self, weights: np.ndarray, bias: np.ndarray, alpha: float = 0.1, lamb: float = 0.1, imm_features: List = [], y_target: float = 1, seed: int|float = 0):
+    def __init__(self, weights: np.ndarray, bias: np.ndarray, alpha: float = 0.1, lamb: float = 0.1, imm_features: List = [], y_target: float = 1, seed: int|float = 0,learning_rate:float = 2.5):
         super().__init__(weights, bias, alpha, lamb, imm_features, y_target, seed)
 
-        self.lr = 2.5
+        self.lr = learning_rate
         self.name = "L1PSD"
 
         if weights is not None and bias is not None:

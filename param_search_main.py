@@ -62,8 +62,8 @@ def main():
     parser.add_argument('--query-file', type=str, default='sba_query.csv')
     parser.add_argument('--test-file', type=str, default='sba_test.csv')
     parser.add_argument('--label-column', type=str, default='NoDefault')
-    parser.add_argument('--model-type', type=str, choices=['simple', 'deep'],
-                        default='simple', help='Baseline model architecture')
+    parser.add_argument('--model-types', type=str, choices=['simple', 'deep'], nargs='+',
+                        default='[simple]', help='Baseline model architecture')
 
     # [0.0, 0.05, 0.1, 0.15, 0.2,]
     parser.add_argument('--delta-max-values', type=float, nargs='+',
@@ -131,7 +131,7 @@ def main():
         query_size_pcts=args.size_values,
         recourse_methods=args.recourse_methods,
         num_epochs=args.epochs,
-        model_type=args.model_type
+        model_types=args.model_types
     )
 
     evaluator.log_summary()

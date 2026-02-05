@@ -48,7 +48,7 @@ def generate_cfs_ccfs(
     use_lime = (W is None or W0 is None)
     factory = RecourseSolverFactory(vo, recourse_method, W, W0)
 
-    metrics = {'cf_success': 0, 'cf_failures': 0, 'ccf_success': 0, 'ccf_failures': 0,
+    metrics = {'cf_success': 0, 'cf_failures': 0, 'ccf_success': 0, 'cf_success_rate': 0 ,'ccf_success_rate': 0, 'ccf_failures': 0,
                'cf_distances': [], 'ccf_distances': []}
 
     predict_fn = lambda x: baseline_model.predict(x)[1]
@@ -95,6 +95,8 @@ def generate_cfs_ccfs(
             metrics['ccf_success'] += 1
             ccf_list.append(pd.DataFrame(ccf.reshape(1, -1), columns=vo.feature_names).assign(
                 original_query_idx=row['original_query_idx'], distance=dist))
+            metrics['cf_success_rate'] = metrics['cf_success'] / len(denied_indices)
+            metrics['ccf_success_rate'] = metrics['ccf_success'] / len(cfs_df)
         except Exception as e:
             metrics['ccf_failures'] += 1
             message = f"[DEBUG CCF {i}] EXCEPTION during generation: {str(e)} \n {traceback.print_exc()}"
@@ -133,7 +135,7 @@ def evaluate_extraction(
     y_extracted = np.concatenate([y_cfs, y_ccfs])
 
     if verbose:
-        logger.info(f"    Training extracted model (alpha={alpha})...")
+        logger.info(f"    Training extracted model (learning_rate={alpha})...")
     extracted_model = ModelWrapper(input_dim=X_extracted.shape[1], model_type=model_type)
     extracted_model.train(
         X_extracted, y_extracted,
@@ -191,7 +193,7 @@ def calculate_quality_score(
         augmented_acc: float,
         augmented_auc: float,
         cf_mean_l1: float,
-        normalization_factor: float = 10.0  # Normalization factor for L1
+        normalization_factor: float = 10.0
 ) -> float:
     """
     Calculate composite quality score - Linear ocombination of metrics
