@@ -15,10 +15,11 @@ from models.ModelWrapper import ModelWrapper
 class CombinedEvaluator:
     """Evaluates CF/CCF generation + extraction across parameter combinations."""
 
-    def __init__(self, verbose: bool = True, logger: Optional[RunLogger] = None):
+    def __init__(self, verbose: bool = True, logger: Optional[RunLogger] = None,imm_features: Optional[list] = None):
         self.verbose = verbose
         self.results: List[Metrics] = []
         self.__logger = logger
+        self.imm_features = imm_features
 
     def __log(self, message: str, level: str = "info"):
         if self.__logger is not None:
@@ -38,9 +39,9 @@ class CombinedEvaluator:
         baseline_model = ModelWrapper(input_dim=vo.X_train.shape[1], model_type=model_type)
         baseline_model.train(vo.X_train, vo.y_train, num_epochs=num_epochs, lr=vo.alpha_values[0], verbose=False)
         W, W0 = baseline_model.extract_weights() if model_type == 'simple' else (None, None)
-
         cfs_df, ccfs_df, gen_metrics = generate_cfs_ccfs(self.__logger,
-                                                         vo, baseline_model, W, W0, query_size_pct, recourse_method
+                                                         vo, baseline_model, W, W0, query_size_pct, recourse_method,
+                                                         imm_features=self.imm_features
                                                          )
 
         if len(cfs_df) == 0 or len(ccfs_df) == 0:
@@ -136,6 +137,9 @@ class CombinedEvaluator:
 
                                     if result is not None:
                                         self.results.append(result)
+                                    else:
+                                        self.__logger.warning(f"No results for run for config {recourse_method}|{model_type}|L-{norm}|delta-max-{delta_max}|"
+                                                       f"\nlambda-{lamb}|learning_rate-{alpha}|query-size-{query_pct}")
 
         return self.results
 

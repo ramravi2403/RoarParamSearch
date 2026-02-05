@@ -1,8 +1,9 @@
 from typing import Optional
 import numpy as np
 from ValueObject import ValueObject
-from optimal_recourse.src.recourse import LARRecourse, ROARLInf
+from optimal_recourse.src.recourse import LARRecourse, ROARLInf, L1Recourse
 from recourse_methods import RobustRecourse
+
 
 class RecourseSolverFactory:
     def __init__(
@@ -10,17 +11,27 @@ class RecourseSolverFactory:
             vo: ValueObject,
             recourse_method: str,
             W: Optional[np.ndarray] = None,
-            W0: Optional[np.ndarray] = None
+            W0: Optional[np.ndarray] = None,
+            imm_features: Optional[list] = None
     ):
         self.recourse_method = recourse_method
         self.delta_max = vo.delta_max_values[0]
         self.lamb = vo.lambda_values[0]
         self.norm = vo.norm_values[0]
-
+        self.imm_features = imm_features if imm_features is not None else []
         self.persistent_solvers = {}
+
+        if recourse_method not in ['roar', 'optimal_l1', 'optimal_linf']:
+            raise ValueError(
+                f"Invalid recourse_method '{recourse_method}'. "
+            )
         if recourse_method == 'roar':
-            self.persistent_solvers[1] = RobustRecourse(W=W, W0=W0, y_target=1, delta_max=self.delta_max)
-            self.persistent_solvers[0] = RobustRecourse(W=W, W0=W0, y_target=0, delta_max=self.delta_max)
+            self.persistent_solvers[1] = RobustRecourse(
+                W=W, W0=W0, y_target=1, delta_max=self.delta_max
+            )
+            self.persistent_solvers[0] = RobustRecourse(
+                W=W, W0=W0, y_target=0, delta_max=self.delta_max
+            )
 
     def create(
             self,
@@ -42,8 +53,22 @@ class RecourseSolverFactory:
         weights = -local_W.flatten() if target == 0 else local_W.flatten()
         bias = -local_W0.flatten() if target == 0 else local_W0.flatten()
 
-        if self.norm == 1:
-            return LARRecourse(weights=weights, bias=bias, alpha=self.delta_max, lamb=self.lamb)
-        elif self.norm in [float('inf'), 'inf']:
-            return ROARLInf(weights=weights, bias=bias, alpha=self.delta_max, lamb=self.lamb)
-        raise ValueError(f"Unsupported norm: {self.norm}")
+        if self.recourse_method == 'optimal_l1':
+            return L1Recourse(
+                weights=weights,
+                bias=bias,
+                alpha=self.delta_max,
+                lamb=self.lamb,
+                imm_features=self.imm_features,
+                y_target=target
+            )
+
+        elif self.recourse_method == 'optimal_linf':
+            return LARRecourse(
+                weights=weights,
+                bias=bias,
+                alpha=self.delta_max,
+                lamb=self.lamb,
+                imm_features=self.imm_features,
+                y_target=target
+            )

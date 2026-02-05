@@ -80,15 +80,19 @@ def main():
     parser.add_argument('--size-values', type=float, nargs='+',
                         default=[0.2, 0.3, 0.5, 1.0],
                         help='Percentages of query set to use')
-    parser.add_argument('--norm-values', type=parse_norm, nargs='+', default=[1],
-                        help="List of norms to test (e.g., 1 2 inf)")
+    # parser.add_argument('--norm-values', type=parse_norm, nargs='+', default=[1],
+    #                     help="List of norms to test (e.g., 1 2 inf)")
 
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--output', type=str, default='combined_evaluation_results')
-    parser.add_argument('--recourse_methods', nargs='+', default=['roar'],
-                        help="List of methods to run, e.g., --recourse_methods roar optimal"
-                        )
+    parser.add_argument('--recourse_methods', nargs='+',
+                        default=['roar'],
+                        choices=['roar', 'optimal_l1', 'optimal_linf'],
+                        help="List of methods: roar, optimal_l1, optimal_linf")
     parser.add_argument('--quiet', action='store_true',default = False)
+    parser.add_argument('--imm-features', type=int, nargs='*',
+                        default=[],
+                        help="Immutable feature indices (e.g., --imm-features 2 5)")
 
     args = parser.parse_args()
     runs_root = Path("combined_evaluation_runs")
@@ -99,15 +103,15 @@ def main():
     logger = RunLogger(log_path=log_path, level=__import__("logging").INFO, also_console=True)
     logger.info(f"Starting run: {run_id}")
     logger.info(f"Run directory: {run_dir}")
-    if 'optimal' in args.recourse_methods:
-        unsupported_norms = [n for n in args.norm_values if n not in [1, float('inf'), 'inf']]
-        if unsupported_norms:
-            logger.exception(f"The 'optimal' recourse method only supports L1 and L-inf norms. "
-                             f"Unsupported norms provided: {unsupported_norms}")
-            raise ValueError(
-                f"The 'optimal' recourse method only supports L1 and L-inf norms. "
-                f"Unsupported norms provided: {unsupported_norms}"
-            )
+    # if 'optimal' in args.recourse_methods:
+    #     unsupported_norms = [n for n in args.norm_values if n not in [1, float('inf'), 'inf']]
+    #     if unsupported_norms:
+    #         logger.exception(f"The 'optimal' recourse method only supports L1 and L-inf norms. "
+    #                          f"Unsupported norms provided: {unsupported_norms}")
+    #         raise ValueError(
+    #             f"The 'optimal' recourse method only supports L1 and L-inf norms. "
+    #             f"Unsupported norms provided: {unsupported_norms}"
+    #         )
     logger.info("Loading data...")
     data_dir = Path(args.data_dir)
     X_train, y_train, X_query, y_query, X_test, y_test, feature_names = load_data(
@@ -115,11 +119,11 @@ def main():
     )
     logger.info(f"Train: {len(X_train)}, Query: {len(X_query)}, Test: {len(X_test)}")
 
-    evaluator = CombinedEvaluator(verbose=not args.quiet,logger=logger)
+    evaluator = CombinedEvaluator(verbose=not args.quiet,logger=logger,imm_features=args.imm_features)
     value_object = ValueObject(delta_max_values=args.delta_max_values,
                                lambda_values=args.lamb_values,
                                alpha_values=args.alpha_values,
-                               norm_values=args.norm_values,
+                               norm_values=[1],
                                X_train=X_train,
                                y_train=y_train,
                                X_query=X_query,

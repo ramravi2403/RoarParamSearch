@@ -43,13 +43,20 @@ def generate_cfs_ccfs(
         W0: Optional[np.ndarray],
         query_size_pct: float,
         recourse_method: str = 'roar',
+        imm_features: Optional[list] = None,
         verbose: bool = False
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict]:
     use_lime = (W is None or W0 is None)
-    factory = RecourseSolverFactory(vo, recourse_method, W, W0)
+    factory = RecourseSolverFactory(
+        vo, recourse_method, W, W0,
+        imm_features=imm_features
+    )
 
-    metrics = {'cf_success': 0, 'cf_failures': 0, 'ccf_success': 0, 'cf_success_rate': 0 ,'ccf_success_rate': 0, 'ccf_failures': 0,
-               'cf_distances': [], 'ccf_distances': []}
+    metrics = {
+        'cf_success': 0, 'cf_failures': 0, 'ccf_success': 0,
+        'cf_success_rate': 0, 'ccf_success_rate': 0, 'ccf_failures': 0,
+        'cf_distances': [], 'ccf_distances': []
+    }
 
     predict_fn = lambda x: baseline_model.predict(x)[1]
     denied_indices = recourse_needed(predict_fn, vo.X_query, target=1)
@@ -65,10 +72,17 @@ def generate_cfs_ccfs(
             local_W, local_W0 = _get_local_explanation(x_i, baseline_model, W, W0, vo.X_train)
             solver = factory.create(local_W, local_W0, target=1, use_lime=use_lime)
 
-            cf = solver.get_recourse(x_i, lamb=vo.lambda_values[0], norm=vo.norm_values[0], lime=use_lime)[
-                0] if recourse_method == 'roar' else solver.get_recourse(x_i)
+            if recourse_method == 'roar':
+                cf = solver.get_recourse(
+                    x_i, lamb=vo.lambda_values[0],
+                    norm=1,
+                    lime=use_lime
+                )[0]
+            else:
+                cf = solver.get_recourse(x_i)
 
-            dist = np.linalg.norm(cf.flatten() - x_i, ord=vo.norm_values[0])
+
+            dist = np.linalg.norm(cf.flatten() - x_i, ord=1)
             metrics['cf_distances'].append(dist)
             metrics['cf_success'] += 1
             cf_list.append(
@@ -87,10 +101,16 @@ def generate_cfs_ccfs(
         try:
             local_W, local_W0 = _get_local_explanation(x_cf, baseline_model, W, W0, vo.X_train)
             solver_ccf = factory.create(local_W, local_W0, target=0, use_lime=use_lime)
-            ccf = solver_ccf.get_recourse(x_cf, lamb=vo.lambda_values[0], norm=vo.norm_values[0], lime=use_lime)[
-                0] if recourse_method == 'roar' else solver_ccf.get_recourse(x_cf)
+            if recourse_method == 'roar':
+                ccf = solver_ccf.get_recourse(
+                    x_cf, lamb=vo.lambda_values[0],
+                    norm=1,
+                    lime=use_lime
+                )[0]
+            else:
+                ccf = solver_ccf.get_recourse(x_cf)
 
-            dist = np.linalg.norm(ccf.flatten() - vo.X_query[int(row['original_query_idx'])], ord=vo.norm_values[0])
+            dist = np.linalg.norm(ccf.flatten() - vo.X_query[int(row['original_query_idx'])], ord=1)
             metrics['ccf_distances'].append(dist)
             metrics['ccf_success'] += 1
             ccf_list.append(pd.DataFrame(ccf.reshape(1, -1), columns=vo.feature_names).assign(
